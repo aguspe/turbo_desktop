@@ -1,0 +1,48 @@
+--------------------------------------------------------
+PathConfigurationsControllerTest: test_show_returns_json
+--------------------------------------------------------
+Started GET "/turbo-desktop/path-configuration.json" for 127.0.0.1 at 2026-03-22 12:33:27 +0100
+-----------------------------------------------------------------------------
+PathConfigurationsControllerTest: test_show_returns_custom_path_configuration
+-----------------------------------------------------------------------------
+Started GET "/turbo-desktop/path-configuration.json" for 127.0.0.1 at 2026-03-22 12:33:27 +0100
+------------------------------------------------------------------------------
+PathConfigurationsControllerTest: test_show_returns_default_path_configuration
+------------------------------------------------------------------------------
+Started GET "/turbo-desktop/path-configuration.json" for 127.0.0.1 at 2026-03-22 12:33:27 +0100
+-------------------------------------------------------------------
+PathConfigurationsControllerTest: test_show_responds_to_json_format
+-------------------------------------------------------------------
+Started GET "/turbo-desktop/path-configuration" for 127.0.0.1 at 2026-03-22 12:33:27 +0100
+-------------------------------------------------------------------
+PathConfigurationsControllerTest: test_show_responds_to_json_format
+-------------------------------------------------------------------
+Started GET "/turbo-desktop/path-configuration" for 127.0.0.1 at 2026-03-22 12:36:22 +0100
+--------------------------------------------------------
+PathConfigurationsControllerTest: test_show_returns_json
+--------------------------------------------------------
+Started GET "/turbo-desktop/path-configuration.json" for 127.0.0.1 at 2026-03-22 12:36:22 +0100
+------------------------------------------------------------------------------
+PathConfigurationsControllerTest: test_show_returns_default_path_configuration
+------------------------------------------------------------------------------
+Started GET "/turbo-desktop/path-configuration.json" for 127.0.0.1 at 2026-03-22 12:36:22 +0100
+-----------------------------------------------------------------------------
+PathConfigurationsControllerTest: test_show_returns_custom_path_configuration
+-----------------------------------------------------------------------------
+Started GET "/turbo-desktop/path-configuration.json" for 127.0.0.1 at 2026-03-22 12:36:22 +0100
+-------------------------------------------------------------------
+PathConfigurationsControllerTest: test_show_responds_to_json_format
+-------------------------------------------------------------------
+Started GET "/turbo-desktop/path-configuration" for 127.0.0.1 at 2026-03-22 12:47:40 +0100
+------------------------------------------------------------------------------
+PathConfigurationsControllerTest: test_show_returns_default_path_configuration
+------------------------------------------------------------------------------
+Started GET "/turbo-desktop/path-configuration.json" for 127.0.0.1 at 2026-03-22 12:47:40 +0100
+--------------------------------------------------------
+PathConfigurationsControllerTest: test_show_returns_json
+--------------------------------------------------------
+Started GET "/turbo-desktop/path-configuration.json" for 127.0.0.1 at 2026-03-22 12:47:40 +0100
+-----------------------------------------------------------------------------
+PathConfigurationsControllerTest: test_show_returns_custom_path_configuration
+-----------------------------------------------------------------------------
+Started GET "/turbo-desktop/path-configuration.json" for 127.0.0.1 at 2026-03-22 12:47:40 +0100

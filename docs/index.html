@@ -1,0 +1,1081 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Turbo Desktop — Documentation</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { scroll-behavior: smooth; font-size: 16px; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    background: #0d1117;
+    color: #c9d1d9;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a { color: #ee7752; text-decoration: none; transition: color 0.2s; }
+  a:hover { color: #e73c7e; }
+
+  .gradient-text {
+    background: linear-gradient(135deg, #ee7752, #e73c7e);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .gradient-border {
+    border-image: linear-gradient(135deg, #ee7752, #e73c7e) 1;
+  }
+
+  /* ── Layout ─────────────────────────────────────────────────── */
+
+  .container { max-width: 960px; margin: 0 auto; padding: 0 2rem; }
+
+  section {
+    padding: 5rem 0;
+    border-bottom: 1px solid #21262d;
+  }
+
+  section:last-of-type { border-bottom: none; }
+
+  h2 {
+    font-size: 2rem;
+    font-weight: 700;
+    margin-bottom: 1.5rem;
+    letter-spacing: -0.02em;
+  }
+
+  h3 {
+    font-size: 1.35rem;
+    font-weight: 600;
+    margin: 2rem 0 0.75rem;
+    color: #e6edf3;
+  }
+
+  p { margin-bottom: 1rem; color: #8b949e; }
+  p.lead { font-size: 1.15rem; color: #c9d1d9; }
+
+  ul, ol { margin: 0.5rem 0 1.5rem 1.5rem; color: #8b949e; }
+  li { margin-bottom: 0.4rem; }
+
+  /* ── Nav ─────────────────────────────────────────────────────── */
+
+  nav {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: rgba(13, 17, 23, 0.85);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid #21262d;
+    padding: 0.75rem 0;
+  }
+
+  nav .container {
+    display: flex;
+    align-items: center;
+    gap: 2rem;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  nav .logo {
+    font-weight: 700;
+    font-size: 1rem;
+    color: #e6edf3;
+    flex-shrink: 0;
+  }
+
+  nav a {
+    font-size: 0.85rem;
+    color: #8b949e;
+    transition: color 0.2s;
+  }
+
+  nav a:hover { color: #e6edf3; }
+
+  /* ── Hero ────────────────────────────────────────────────────── */
+
+  .hero {
+    text-align: center;
+    padding: 8rem 0 6rem;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .hero::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 800px;
+    height: 800px;
+    background: radial-gradient(circle, rgba(231, 60, 126, 0.08) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .hero h1 {
+    font-size: 4rem;
+    font-weight: 800;
+    letter-spacing: -0.04em;
+    margin-bottom: 1rem;
+  }
+
+  .hero .tagline {
+    font-size: 1.3rem;
+    color: #8b949e;
+    max-width: 600px;
+    margin: 0 auto 2.5rem;
+    line-height: 1.5;
+  }
+
+  .hero .badges {
+    display: flex;
+    justify-content: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+
+  .badge {
+    display: inline-block;
+    padding: 0.35rem 0.85rem;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    background: #161b22;
+    border: 1px solid #30363d;
+    color: #c9d1d9;
+  }
+
+  .badge.accent {
+    background: linear-gradient(135deg, rgba(231, 60, 126, 0.15), rgba(238, 119, 82, 0.15));
+    border-color: rgba(231, 60, 126, 0.3);
+    color: #ee7752;
+  }
+
+  /* ── Code Blocks ────────────────────────────────────────────── */
+
+  pre {
+    background: #161b22;
+    border: 1px solid #21262d;
+    border-radius: 8px;
+    padding: 1.25rem 1.5rem;
+    overflow-x: auto;
+    margin: 1rem 0 1.5rem;
+    font-size: 0.875rem;
+    line-height: 1.65;
+  }
+
+  code {
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, Consolas, monospace;
+    font-size: 0.875em;
+  }
+
+  p code, li code {
+    background: #161b22;
+    padding: 0.15rem 0.45rem;
+    border-radius: 4px;
+    border: 1px solid #21262d;
+    font-size: 0.85em;
+    color: #e6edf3;
+  }
+
+  /* Syntax highlighting */
+  .kw { color: #ff7b72; }
+  .fn { color: #d2a8ff; }
+  .st { color: #a5d6ff; }
+  .cm { color: #484f58; font-style: italic; }
+  .ty { color: #79c0ff; }
+  .nr { color: #79c0ff; }
+  .at { color: #ffa657; }
+  .op { color: #ff7b72; }
+  .ht { color: #7ee787; }
+
+  /* ── Architecture Diagram ───────────────────────────────────── */
+
+  .diagram {
+    margin: 2rem 0;
+    padding: 2.5rem;
+    background: #161b22;
+    border: 1px solid #21262d;
+    border-radius: 12px;
+    overflow-x: auto;
+  }
+
+  .diagram-title {
+    text-align: center;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #484f58;
+    margin-bottom: 2rem;
+  }
+
+  .diagram-flow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    flex-wrap: nowrap;
+    min-width: 700px;
+  }
+
+  .diagram-box {
+    padding: 1rem 1.25rem;
+    border-radius: 8px;
+    text-align: center;
+    min-width: 140px;
+    flex-shrink: 0;
+  }
+
+  .diagram-box.server {
+    background: rgba(126, 231, 135, 0.08);
+    border: 1px solid rgba(126, 231, 135, 0.25);
+  }
+
+  .diagram-box.webview {
+    background: rgba(121, 192, 255, 0.08);
+    border: 1px solid rgba(121, 192, 255, 0.25);
+  }
+
+  .diagram-box.native {
+    background: rgba(231, 60, 126, 0.08);
+    border: 1px solid rgba(231, 60, 126, 0.25);
+  }
+
+  .diagram-box.config {
+    background: rgba(255, 166, 87, 0.08);
+    border: 1px solid rgba(255, 166, 87, 0.25);
+  }
+
+  .diagram-box .label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 0.35rem;
+    opacity: 0.6;
+  }
+
+  .diagram-box .name {
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: #e6edf3;
+  }
+
+  .diagram-box .detail {
+    font-size: 0.75rem;
+    color: #484f58;
+    margin-top: 0.25rem;
+  }
+
+  .diagram-arrow {
+    color: #30363d;
+    font-size: 1.5rem;
+    padding: 0 0.5rem;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+  }
+
+  /* Vertical diagram */
+  .diagram-vertical {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+  }
+
+  .diagram-vertical .diagram-arrow {
+    transform: rotate(90deg);
+    padding: 0.25rem 0;
+  }
+
+  .diagram-cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+    margin: 2rem 0;
+  }
+
+  @media (max-width: 640px) {
+    .diagram-cols { grid-template-columns: 1fr; }
+    .hero h1 { font-size: 2.5rem; }
+    .diagram-flow { flex-direction: column; min-width: 0; }
+    .diagram-arrow { transform: rotate(90deg); }
+  }
+
+  /* ── Step Cards ─────────────────────────────────────────────── */
+
+  .step {
+    display: flex;
+    gap: 1.5rem;
+    margin: 2rem 0;
+    align-items: flex-start;
+  }
+
+  .step-number {
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #e73c7e, #ee7752);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.85rem;
+    color: #fff;
+    margin-top: 0.15rem;
+  }
+
+  .step-content { flex: 1; min-width: 0; }
+  .step-content h3 { margin-top: 0; color: #e6edf3; }
+
+  /* ── Comparison Table ───────────────────────────────────────── */
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1.5rem 0;
+    font-size: 0.9rem;
+  }
+
+  th, td {
+    padding: 0.75rem 1rem;
+    text-align: left;
+    border-bottom: 1px solid #21262d;
+  }
+
+  th {
+    color: #e6edf3;
+    font-weight: 600;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    background: #161b22;
+  }
+
+  td { color: #8b949e; }
+  td:first-child { color: #c9d1d9; font-weight: 500; }
+
+  /* ── Cards ──────────────────────────────────────────────────── */
+
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 1rem;
+    margin: 1.5rem 0;
+  }
+
+  .card {
+    background: #161b22;
+    border: 1px solid #21262d;
+    border-radius: 8px;
+    padding: 1.25rem;
+  }
+
+  .card h4 {
+    color: #e6edf3;
+    font-size: 1rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .card p { font-size: 0.9rem; margin-bottom: 0; }
+
+  /* ── Footer ─────────────────────────────────────────────────── */
+
+  footer {
+    text-align: center;
+    padding: 3rem 0;
+    color: #484f58;
+    font-size: 0.85rem;
+  }
+
+  footer a { color: #8b949e; }
+
+  /* ── Misc ───────────────────────────────────────────────────── */
+
+  .divider {
+    height: 2px;
+    background: linear-gradient(90deg, transparent, #e73c7e, #ee7752, transparent);
+    margin: 0;
+    border: none;
+  }
+
+  .file-label {
+    display: inline-block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #484f58;
+    background: #0d1117;
+    border: 1px solid #21262d;
+    border-bottom: none;
+    padding: 0.3rem 0.75rem;
+    border-radius: 6px 6px 0 0;
+    margin-bottom: -1px;
+    position: relative;
+    z-index: 1;
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Navigation
+     ═══════════════════════════════════════════════════════════════ -->
+<nav>
+  <div class="container">
+    <span class="logo gradient-text">Turbo Desktop</span>
+    <a href="#problem">The Problem</a>
+    <a href="#architecture">Architecture</a>
+    <a href="#how-it-works">How It Works</a>
+    <a href="#path-config">Path Config</a>
+    <a href="#bridge">Bridge</a>
+    <a href="#rails-gem">Rails Gem</a>
+    <a href="#quickstart">Quick Start</a>
+    <a href="#comparison">Comparison</a>
+  </div>
+</nav>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Hero
+     ═══════════════════════════════════════════════════════════════ -->
+<section class="hero">
+  <div class="container">
+    <h1><span class="gradient-text">Turbo Desktop</span></h1>
+    <p class="tagline">Turbo Native for Desktop &mdash; wrap your Rails app in a native macOS / Windows / Linux shell</p>
+    <div class="badges">
+      <span class="badge accent">Tauri 2</span>
+      <span class="badge">Turbo Drive</span>
+      <span class="badge">Hotwire Native</span>
+      <span class="badge">Rust</span>
+      <span class="badge">Rails Gem</span>
+    </div>
+  </div>
+</section>
+
+<hr class="divider">
+
+<!-- ═══════════════════════════════════════════════════════════════
+     The Problem
+     ═══════════════════════════════════════════════════════════════ -->
+<section id="problem">
+  <div class="container">
+    <h2><span class="gradient-text">The Problem</span></h2>
+    <p class="lead">
+      Rails developers already have <strong style="color:#e6edf3">Hotwire Native</strong> (turbo-ios and turbo-android) to
+      wrap their web apps in native mobile shells. But there has been <em>nothing</em> for desktop.
+    </p>
+    <p>
+      If you want to ship a macOS, Windows, or Linux app that talks to your existing Rails backend,
+      you have been forced to either build a full Electron app from scratch or cobble together
+      a custom WebView wrapper with no conventions.
+    </p>
+    <p>
+      <strong style="color:#e6edf3">Turbo Desktop</strong> fills this gap. It gives you a thin, native desktop shell
+      powered by <a href="https://tauri.app">Tauri 2</a> that treats your Rails app as the single source of truth &mdash;
+      the same pattern you already know from Hotwire Native, but for the desktop.
+    </p>
+
+    <div class="card-grid">
+      <div class="card">
+        <h4>No new UI framework</h4>
+        <p>Your existing Rails views, Turbo Frames, and Stimulus controllers just work.</p>
+      </div>
+      <div class="card">
+        <h4>Native when you need it</h4>
+        <p>Notifications, file pickers, menus, and keyboard shortcuts via Bridge Components.</p>
+      </div>
+      <div class="card">
+        <h4>Tiny binary</h4>
+        <p>Tauri uses the OS WebView &mdash; no bundled Chromium. Ship a 5-10 MB app.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Architecture
+     ═══════════════════════════════════════════════════════════════ -->
+<section id="architecture">
+  <div class="container">
+    <h2><span class="gradient-text">Architecture</span></h2>
+    <p class="lead">Three layers that mirror the Hotwire Native pattern:</p>
+
+    <!-- Main flow -->
+    <div class="diagram">
+      <div class="diagram-title">Request Flow</div>
+      <div class="diagram-flow">
+        <div class="diagram-box server">
+          <div class="label">Backend</div>
+          <div class="name">Rails Server</div>
+          <div class="detail">HTML + Turbo Drive</div>
+        </div>
+        <div class="diagram-arrow">&rarr;</div>
+        <div class="diagram-box webview">
+          <div class="label">Rendering</div>
+          <div class="name">WebView</div>
+          <div class="detail">turbo-desktop.js</div>
+        </div>
+        <div class="diagram-arrow">&rarr;</div>
+        <div class="diagram-box native">
+          <div class="label">Shell</div>
+          <div class="name">Tauri / Rust</div>
+          <div class="detail">Windows, menus, OS APIs</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Path config flow -->
+    <div class="diagram-cols">
+      <div class="diagram">
+        <div class="diagram-title">Path Configuration</div>
+        <div class="diagram-vertical">
+          <div class="diagram-box config" style="width:100%">
+            <div class="name">path-configuration.json</div>
+            <div class="detail">Served by Rails or bundled locally</div>
+          </div>
+          <div class="diagram-arrow">&darr;</div>
+          <div class="diagram-box native" style="width:100%">
+            <div class="name">Rust PathConfigurationStore</div>
+            <div class="detail">Regex matching, last-match wins</div>
+          </div>
+          <div class="diagram-arrow">&darr;</div>
+          <div class="diagram-box webview" style="width:100%">
+            <div class="name">Presentation Decision</div>
+            <div class="detail">default | modal | new_window | native | replace | none</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="diagram">
+        <div class="diagram-title">Bridge Communication</div>
+        <div class="diagram-vertical">
+          <div class="diagram-box webview" style="width:100%">
+            <div class="name">Stimulus Controller</div>
+            <div class="detail">extends BridgeComponent</div>
+          </div>
+          <div class="diagram-arrow" style="display:flex;flex-direction:column;font-size:1rem;line-height:1.3">&darr; send() &nbsp; &uarr; onReceive()</div>
+          <div class="diagram-box webview" style="width:100%">
+            <div class="name">turbo-desktop.js</div>
+            <div class="detail">Tauri invoke / event listen</div>
+          </div>
+          <div class="diagram-arrow" style="display:flex;flex-direction:column;font-size:1rem;line-height:1.3">&darr; invoke &nbsp; &uarr; emit</div>
+          <div class="diagram-box native" style="width:100%">
+            <div class="name">Rust Bridge Handlers</div>
+            <div class="detail">notification, menu-item, file-picker, badge, shortcut</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     How It Works
+     ═══════════════════════════════════════════════════════════════ -->
+<section id="how-it-works">
+  <div class="container">
+    <h2><span class="gradient-text">How It Works</span></h2>
+
+    <div class="step">
+      <div class="step-number">1</div>
+      <div class="step-content">
+        <h3>The Tauri shell loads your Rails URL</h3>
+        <p>
+          On launch, Rust reads <code>turbo-desktop.toml</code> for your <code>server_url</code>,
+          then navigates the main WebView window to that URL with <code>window.location.replace()</code>.
+        </p>
+        <pre><code><span class="cm">// main.rs — startup</span>
+<span class="kw">let</span> app_config = window::<span class="fn">load_config</span>(<span class="ty">None</span>);
+<span class="kw">let</span> url: url::Url = server_url.<span class="fn">parse</span>().<span class="fn">expect</span>(<span class="st">"Invalid server URL"</span>);
+main_window.<span class="fn">eval</span>(&amp;<span class="fn">format!</span>(<span class="st">"window.location.replace('{}')"</span>, url));</code></pre>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-number">2</div>
+      <div class="step-content">
+        <h3>turbo-desktop.js is injected on every page load</h3>
+        <p>
+          The <code>on_page_load</code> callback fires after each navigation completes.
+          It injects the full bridge script into the WebView, creating the global
+          <code>window.TurboDesktop</code> API.
+        </p>
+        <pre><code><span class="cm">// main.rs — injection</span>
+.<span class="fn">on_page_load</span>(|webview, payload| {
+    <span class="kw">if let</span> PageLoadEvent::Finished = payload.<span class="fn">event</span>() {
+        <span class="kw">let</span> js = <span class="fn">include_str!</span>(<span class="st">"../../src/turbo-desktop.js"</span>);
+        <span class="kw">let</span> _ = webview.<span class="fn">eval</span>(js);
+    }
+})</code></pre>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-number">3</div>
+      <div class="step-content">
+        <h3>Turbo Drive events are intercepted</h3>
+        <p>
+          The injected JS listens for <code>turbo:before-visit</code>. Instead of letting
+          Turbo navigate directly, it sends a <strong>visit proposal</strong> to the Rust shell
+          via Tauri's <code>invoke</code> IPC.
+        </p>
+        <pre><code><span class="cm">// turbo-desktop.js</span>
+document.<span class="fn">addEventListener</span>(<span class="st">"turbo:before-visit"</span>, <span class="kw">async</span> (event) =&gt; {
+  <span class="kw">const</span> url = event.detail.url;
+  <span class="kw">const</span> response = <span class="kw">await</span> TurboDesktop.<span class="fn">proposeVisit</span>(url, <span class="st">"advance"</span>);
+
+  <span class="cm">// If the native shell handled it, cancel the Turbo visit</span>
+  <span class="kw">if</span> (response.action === <span class="st">"none"</span>) {
+    event.<span class="fn">preventDefault</span>();
+  }
+});</code></pre>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-number">4</div>
+      <div class="step-content">
+        <h3>Path configuration determines presentation</h3>
+        <p>
+          Rust matches the URL path against the loaded path configuration rules (regex,
+          last match wins) and returns a <code>Presentation</code> variant:
+          <code>Default</code>, <code>Modal</code>, <code>NewWindow</code>,
+          <code>Replace</code>, <code>Native</code>, or <code>None</code>.
+        </p>
+        <pre><code><span class="cm">// navigation.rs</span>
+<span class="kw">match</span> properties.presentation {
+    Presentation::Default  =&gt; <span class="cm">/* navigate in current window */</span>,
+    Presentation::Modal    =&gt; <span class="cm">/* open a new modal window */</span>,
+    Presentation::NewWindow =&gt; <span class="cm">/* open a separate window */</span>,
+    Presentation::Replace  =&gt; <span class="cm">/* replace, no back navigation */</span>,
+    Presentation::Native   =&gt; <span class="cm">/* emit event for native screen */</span>,
+    Presentation::None     =&gt; <span class="cm">/* do nothing (bridge handles it) */</span>,
+}</code></pre>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-number">5</div>
+      <div class="step-content">
+        <h3>Bridge components enable web-to-native communication</h3>
+        <p>
+          Stimulus controllers on the web page extend <code>BridgeComponent</code> and call
+          <code>send()</code> to invoke native features. The Rust side handles built-in
+          components (notifications, menus, file pickers, badges, shortcuts) and
+          forwards unknown ones as events for custom handling.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Path Configuration
+     ═══════════════════════════════════════════════════════════════ -->
+<section id="path-config">
+  <div class="container">
+    <h2><span class="gradient-text">Path Configuration</span></h2>
+    <p class="lead">
+      The path configuration is a JSON file that maps URL patterns to presentation rules.
+      This is the same concept from turbo-ios and turbo-android &mdash; the native shell
+      consults it for every navigation to decide <em>how</em> to display each page.
+    </p>
+
+    <div class="file-label">path-configuration.json</div>
+    <pre><code>{
+  <span class="st">"settings"</span>: {
+    <span class="st">"screenshots_enabled"</span>: <span class="kw">true</span>,
+    <span class="st">"pull_to_refresh_enabled"</span>: <span class="kw">false</span>
+  },
+  <span class="st">"rules"</span>: [
+    {
+      <span class="st">"patterns"</span>: [<span class="st">"/"</span>],
+      <span class="st">"properties"</span>: { <span class="st">"presentation"</span>: <span class="st">"default"</span> }
+    },
+    {
+      <span class="st">"patterns"</span>: [<span class="st">"/new$"</span>, <span class="st">"/edit$"</span>],
+      <span class="st">"properties"</span>: {
+        <span class="st">"presentation"</span>: <span class="st">"modal"</span>,
+        <span class="st">"title"</span>: <span class="st">"Edit"</span>
+      }
+    },
+    {
+      <span class="st">"patterns"</span>: [<span class="st">"/reports/"</span>],
+      <span class="st">"properties"</span>: { <span class="st">"presentation"</span>: <span class="st">"new_window"</span> }
+    },
+    {
+      <span class="st">"patterns"</span>: [<span class="st">"/settings"</span>],
+      <span class="st">"properties"</span>: { <span class="st">"presentation"</span>: <span class="st">"native"</span> }
+    }
+  ]
+}</code></pre>
+
+    <h3>Presentation Types</h3>
+    <table>
+      <thead>
+        <tr><th>Value</th><th>Behavior</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>default</code></td><td>Navigate in the current window. Turbo Drive handles it normally.</td></tr>
+        <tr><td><code>modal</code></td><td>Open the URL in a new modal-style window (800x600). The JS visit is cancelled.</td></tr>
+        <tr><td><code>new_window</code></td><td>Open the URL in a full separate window (1200x800).</td></tr>
+        <tr><td><code>replace</code></td><td>Replace the current page with no back-navigation history entry.</td></tr>
+        <tr><td><code>native</code></td><td>Emit a <code>native-screen-requested</code> event for fully native Rust UI.</td></tr>
+        <tr><td><code>none</code></td><td>Do nothing &mdash; the navigation is handled entirely by a Bridge Component.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Rule Matching</h3>
+    <p>
+      Patterns are <strong>regular expressions</strong> matched against the URL path. Rules are
+      evaluated in order and the <strong>last match wins</strong> &mdash; identical to Hotwire Native.
+      This lets you set broad defaults early and add specific overrides later.
+    </p>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Bridge Components
+     ═══════════════════════════════════════════════════════════════ -->
+<section id="bridge">
+  <div class="container">
+    <h2><span class="gradient-text">Bridge Components</span></h2>
+    <p class="lead">
+      The Bridge is the desktop equivalent of <strong style="color:#e6edf3">Strada</strong>. It lets your web
+      components talk to native OS features through structured message passing.
+    </p>
+
+    <h3>The Flow</h3>
+    <ol>
+      <li>A Stimulus controller on the web page extends <code>BridgeComponent</code></li>
+      <li>It calls <code>this.send("connect", { title: "Export" })</code></li>
+      <li><code>turbo-desktop.js</code> forwards this to Rust via Tauri's <code>invoke</code></li>
+      <li>Rust handles it (e.g., registers a native menu item)</li>
+      <li>When the native side triggers (e.g., menu clicked), it emits a response back</li>
+      <li>The web component receives it via <code>onReceive(message)</code></li>
+    </ol>
+
+    <h3>Built-in Components</h3>
+    <div class="card-grid">
+      <div class="card">
+        <h4><code>notification</code></h4>
+        <p>Show native OS notifications with title and body.</p>
+      </div>
+      <div class="card">
+        <h4><code>menu-item</code></h4>
+        <p>Register / unregister items in the native menu bar.</p>
+      </div>
+      <div class="card">
+        <h4><code>file-picker</code></h4>
+        <p>Open native file-open and file-save dialogs.</p>
+      </div>
+      <div class="card">
+        <h4><code>badge</code></h4>
+        <p>Set the dock/taskbar badge count (macOS).</p>
+      </div>
+      <div class="card">
+        <h4><code>shortcut</code></h4>
+        <p>Register global keyboard shortcuts with accelerators.</p>
+      </div>
+    </div>
+
+    <h3>JavaScript: Stimulus Bridge</h3>
+    <div class="file-label">app/javascript/controllers/notification_bridge_controller.js</div>
+    <pre><code><span class="kw">import</span> { Controller } <span class="kw">from</span> <span class="st">"@hotwired/stimulus"</span>
+
+<span class="kw">export default class extends</span> TurboDesktop.<span class="fn">stimulusBridge</span>(Controller, <span class="st">"notification"</span>) {
+  <span class="fn">connect</span>() {
+    <span class="kw">super</span>.<span class="fn">connect</span>()
+    <span class="kw">this</span>.<span class="fn">sendBridge</span>(<span class="st">"connect"</span>, { title: <span class="st">"My App"</span> })
+  }
+
+  <span class="fn">notify</span>(event) {
+    <span class="kw">this</span>.<span class="fn">sendBridge</span>(<span class="st">"connect"</span>, {
+      title: <span class="st">"New Message"</span>,
+      body:  event.target.dataset.body
+    })
+  }
+
+  <span class="fn">receiveBridge</span>(message) {
+    console.<span class="fn">log</span>(<span class="st">"Native says:"</span>, message)
+  }
+}</code></pre>
+
+    <h3>Rust: Handling Bridge Messages</h3>
+    <div class="file-label">src-tauri/src/bridge.rs</div>
+    <pre><code><span class="at">#[tauri::command]</span>
+<span class="kw">pub async fn</span> <span class="fn">handle_bridge_message</span>(
+    app: tauri::AppHandle,
+    message: BridgeMessage,
+) -&gt; <span class="ty">Result</span>&lt;serde_json::Value, String&gt; {
+    <span class="kw">match</span> message.component.<span class="fn">as_str</span>() {
+        <span class="st">"notification"</span> =&gt; <span class="fn">handle_notification</span>(&amp;app, &amp;message).<span class="kw">await</span>,
+        <span class="st">"menu-item"</span>   =&gt; <span class="fn">handle_menu_item</span>(&amp;app, &amp;message).<span class="kw">await</span>,
+        <span class="st">"file-picker"</span> =&gt; <span class="fn">handle_file_picker</span>(&amp;app, &amp;message).<span class="kw">await</span>,
+        <span class="st">"badge"</span>       =&gt; <span class="fn">handle_badge</span>(&amp;app, &amp;message).<span class="kw">await</span>,
+        <span class="st">"shortcut"</span>    =&gt; <span class="fn">handle_shortcut</span>(&amp;app, &amp;message).<span class="kw">await</span>,
+        _ =&gt; {
+            <span class="cm">// Forward unknown components as events</span>
+            app.<span class="fn">emit</span>(<span class="st">"bridge-message"</span>, &amp;message)?;
+            <span class="ty">Ok</span>(<span class="fn">serde_json::json!</span>({ <span class="st">"status"</span>: <span class="st">"forwarded"</span> }))
+        }
+    }
+}</code></pre>
+
+    <h3>Rails: View Helpers</h3>
+    <div class="file-label">app/views/posts/show.html.erb</div>
+    <pre><code><span class="cm">&lt;%# Attach bridge data attributes to any element %&gt;</span>
+<span class="ht">&lt;%=</span> tag.button <span class="st">"Export PDF"</span>,
+    **<span class="fn">turbo_desktop_bridge</span>(<span class="st">"menu-item"</span>,
+      title: <span class="st">"Export PDF"</span>,
+      shortcut: <span class="st">"Cmd+E"</span>
+    ) <span class="ht">%&gt;</span></code></pre>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Rails Gem
+     ═══════════════════════════════════════════════════════════════ -->
+<section id="rails-gem">
+  <div class="container">
+    <h2><span class="gradient-text">Rails Gem</span></h2>
+    <p class="lead">
+      The <code>turbo_desktop-rails</code> gem gives your Rails app awareness of the desktop shell,
+      exactly like <code>turbo-rails</code> does for Turbo Native mobile apps.
+    </p>
+
+    <h3>Detection</h3>
+    <p>
+      The gem detects desktop app requests by inspecting the User-Agent header. The Tauri shell
+      sends a UA string like <code>Turbo Desktop/0.1.0 (macOS; aarch64)</code>.
+    </p>
+
+    <h3>View Helpers</h3>
+    <table>
+      <thead>
+        <tr><th>Helper</th><th>Description</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>turbo_desktop_app?</code></td>
+          <td>Returns <code>true</code> if the request comes from a Turbo Desktop shell.</td>
+        </tr>
+        <tr>
+          <td><code>turbo_desktop_platform</code></td>
+          <td>Returns <code>"macos"</code>, <code>"windows"</code>, <code>"linux"</code>, or <code>nil</code>.</td>
+        </tr>
+        <tr>
+          <td><code>turbo_desktop_arch</code></td>
+          <td>Returns <code>"aarch64"</code>, <code>"x86_64"</code>, or <code>nil</code>.</td>
+        </tr>
+        <tr>
+          <td><code>turbo_desktop_only { }</code></td>
+          <td>Renders the block only when inside the desktop app.</td>
+        </tr>
+        <tr>
+          <td><code>turbo_web_only { }</code></td>
+          <td>Renders the block only for regular web (non-desktop) users.</td>
+        </tr>
+        <tr>
+          <td><code>turbo_desktop_bridge(component, **opts)</code></td>
+          <td>Outputs <code>data-turbo-desktop-bridge</code> attributes for bridge components.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>Usage Examples</h3>
+    <div class="file-label">app/views/layouts/application.html.erb</div>
+    <pre><code><span class="cm">&lt;%# Hide the web navbar inside the desktop app %&gt;</span>
+<span class="ht">&lt;%</span> <span class="fn">turbo_web_only</span> <span class="kw">do</span> <span class="ht">%&gt;</span>
+  &lt;nav class="web-navbar"&gt;...&lt;/nav&gt;
+<span class="ht">&lt;%</span> <span class="kw">end</span> <span class="ht">%&gt;</span>
+
+<span class="cm">&lt;%# Show a native-only sidebar button %&gt;</span>
+<span class="ht">&lt;%</span> <span class="fn">turbo_desktop_only</span> <span class="kw">do</span> <span class="ht">%&gt;</span>
+  &lt;button data-controller="sidebar"&gt;Toggle Sidebar&lt;/button&gt;
+<span class="ht">&lt;%</span> <span class="kw">end</span> <span class="ht">%&gt;</span>
+
+<span class="cm">&lt;%# Platform-specific styles %&gt;</span>
+<span class="ht">&lt;%</span> <span class="kw">if</span> <span class="fn">turbo_desktop_platform</span> == <span class="st">"macos"</span> <span class="ht">%&gt;</span>
+  &lt;body class="desktop macos"&gt;
+<span class="ht">&lt;%</span> <span class="kw">end</span> <span class="ht">%&gt;</span></code></pre>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Quick Start
+     ═══════════════════════════════════════════════════════════════ -->
+<section id="quickstart">
+  <div class="container">
+    <h2><span class="gradient-text">Quick Start</span></h2>
+
+    <div class="step">
+      <div class="step-number">1</div>
+      <div class="step-content">
+        <h3>Clone and install dependencies</h3>
+        <pre><code>git clone https://github.com/your-org/turbo_desktop.git
+cd turbo_desktop
+cargo install tauri-cli
+npm install</code></pre>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-number">2</div>
+      <div class="step-content">
+        <h3>Configure your Rails server URL</h3>
+        <p>Edit <code>turbo-desktop.toml</code> (or the relevant config) to point at your running Rails app:</p>
+        <pre><code>[app]
+server_url = <span class="st">"http://localhost:3000"</span>
+app_name   = <span class="st">"My App"</span>
+
+[path_configuration]
+url = <span class="st">"http://localhost:3000/turbo-desktop/path-configuration.json"</span></code></pre>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-number">3</div>
+      <div class="step-content">
+        <h3>Add the Rails gem</h3>
+        <pre><code><span class="cm"># Gemfile</span>
+gem <span class="st">"turbo_desktop-rails"</span></code></pre>
+        <pre><code>bundle install
+rails generate turbo_desktop:install</code></pre>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-number">4</div>
+      <div class="step-content">
+        <h3>Serve path configuration from Rails</h3>
+        <p>Create a route that returns the path configuration JSON:</p>
+        <pre><code><span class="cm"># config/routes.rb</span>
+get <span class="st">"/turbo-desktop/path-configuration"</span>, to: <span class="st">"turbo_desktop#path_configuration"</span></code></pre>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-number">5</div>
+      <div class="step-content">
+        <h3>Run the desktop app</h3>
+        <pre><code><span class="cm"># Start your Rails server in one terminal</span>
+bin/rails server
+
+<span class="cm"># Start the Tauri desktop app in another</span>
+cargo tauri dev</code></pre>
+        <p>
+          Your Rails app now runs inside a native desktop window with full Turbo Drive
+          integration, path-configuration-based routing, and bridge component support.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Comparison
+     ═══════════════════════════════════════════════════════════════ -->
+<section id="comparison">
+  <div class="container">
+    <h2><span class="gradient-text">How It Relates to turbo-ios and turbo-android</span></h2>
+    <p class="lead">
+      Turbo Desktop is the third leg of the Hotwire Native story. Same patterns, different platform.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Concept</th>
+          <th>turbo-ios</th>
+          <th>turbo-android</th>
+          <th>Turbo Desktop</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Shell runtime</td>
+          <td>WKWebView (Swift)</td>
+          <td>WebView (Kotlin)</td>
+          <td>Tauri WebView (Rust)</td>
+        </tr>
+        <tr>
+          <td>Path configuration</td>
+          <td>JSON, last-match-wins</td>
+          <td>JSON, last-match-wins</td>
+          <td>JSON, last-match-wins</td>
+        </tr>
+        <tr>
+          <td>Bridge / native comms</td>
+          <td>Strada</td>
+          <td>Strada</td>
+          <td>BridgeComponent</td>
+        </tr>
+        <tr>
+          <td>Presentation types</td>
+          <td>push, modal, replace</td>
+          <td>push, modal, replace</td>
+          <td>default, modal, new_window, replace, native, none</td>
+        </tr>
+        <tr>
+          <td>JS injection</td>
+          <td>WKUserScript</td>
+          <td>evaluateJavascript</td>
+          <td>on_page_load + eval</td>
+        </tr>
+        <tr>
+          <td>Rails gem</td>
+          <td>turbo-rails (turbo_native_app?)</td>
+          <td>turbo-rails (turbo_native_app?)</td>
+          <td>turbo_desktop-rails (turbo_desktop_app?)</td>
+        </tr>
+        <tr>
+          <td>Binary size</td>
+          <td>Uses system WebKit</td>
+          <td>~20 MB (Chrome WebView)</td>
+          <td>~5-10 MB (OS WebView)</td>
+        </tr>
+        <tr>
+          <td>Platforms</td>
+          <td>iOS, iPadOS</td>
+          <td>Android</td>
+          <td>macOS, Windows, Linux</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>
+      The key insight is that <strong style="color:#e6edf3">every concept transfers directly</strong>:
+      if you already know how to structure a Hotwire Native mobile app with path configuration
+      and Strada bridge components, you already know how to use Turbo Desktop.
+      The only difference is that the native shell is written in Rust (via Tauri) instead of
+      Swift or Kotlin.
+    </p>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Footer
+     ═══════════════════════════════════════════════════════════════ -->
+<hr class="divider">
+<footer>
+  <div class="container">
+    <p>
+      <strong class="gradient-text">Turbo Desktop</strong> &mdash;
+      Turbo Native for the desktop.
+      Built with <a href="https://tauri.app">Tauri</a>,
+      <a href="https://hotwired.dev">Hotwire</a>, and
+      <a href="https://rubyonrails.org">Ruby on Rails</a>.
+    </p>
+  </div>
+</footer>
+
+</body>
+</html>

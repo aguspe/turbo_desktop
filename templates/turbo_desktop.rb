@@ -1,0 +1,33 @@
+# config/initializers/turbo_desktop.rb
+#
+# Configure how the Turbo Desktop native shell presents your Rails routes.
+# This path configuration follows the same pattern as Hotwire Native (turbo-ios/turbo-android).
+#
+# Presentations:
+#   "default"    — Navigate in the current window (standard Turbo Drive behavior)
+#   "modal"      — Open in a modal/sheet window
+#   "new_window" — Open in a separate window
+#   "replace"    — Replace the current page (no back button)
+#   "native"     — Route to a fully native screen (handled by Rust/Tauri)
+#   "none"       — Do nothing (handled by a bridge component)
+
+TurboDesktop.configure do |config|
+  config.path_configuration = {
+    settings: {
+      screenshots_enabled: false
+    },
+    rules: [
+      # Default: all pages navigate in the current window
+      { patterns: ["/"], properties: { presentation: "default" } },
+
+      # Forms open in a modal window
+      { patterns: ["/new$", "/edit$"], properties: { presentation: "modal" } },
+
+      # Example: settings could be a native screen
+      # { patterns: ["/settings"], properties: { presentation: "native" } },
+
+      # Example: external links open in a new window
+      # { patterns: ["^http"], properties: { presentation: "new_window" } },
+    ]
+  }
+end

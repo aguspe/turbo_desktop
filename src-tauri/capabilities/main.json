@@ -1,0 +1,23 @@
+{
+  "identifier": "main-capability",
+  "description": "Main window capabilities for Turbo Desktop",
+  "windows": ["main"],
+  "remote": {
+    "urls": ["http://localhost:*", "https://*"]
+  },
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "core:window:allow-set-title",
+    "core:window:allow-close",
+    "core:window:allow-create",
+    "core:window:allow-inner-size",
+    "core:window:allow-outer-position",
+    "core:window:allow-scale-factor",
+    "core:window:allow-is-fullscreen",
+    "core:window:allow-is-maximized",
+    "shell:allow-open",
+    "notification:default",
+    "dialog:default"
+  ]
+}
