@@ -51,7 +51,18 @@ fn default_app_name() -> String {
 }
 
 fn default_user_agent() -> String {
-    format!("Turbo Desktop/{} (macOS)", env!("CARGO_PKG_VERSION"))
+    let os = match std::env::consts::OS {
+        "macos" => "macOS",
+        "windows" => "Windows",
+        "linux" => "Linux",
+        other => other,
+    };
+    format!(
+        "Turbo Desktop/{} ({}; {})",
+        env!("CARGO_PKG_VERSION"),
+        os,
+        std::env::consts::ARCH
+    )
 }
 
 fn default_width() -> f64 {
@@ -116,7 +127,7 @@ pub async fn get_window_info(window: tauri::Window) -> Result<serde_json::Value,
         "scaleFactor": scale,
         "isFullscreen": is_fullscreen,
         "isMaximized": is_maximized,
-        "platform": "macos",
+        "platform": std::env::consts::OS,
         "arch": std::env::consts::ARCH,
     }))
 }

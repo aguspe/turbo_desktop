@@ -4,13 +4,14 @@
  * turbo-desktop CLI
  *
  * Commands:
+ *   new    — Create a new Rails app with Turbo Desktop pre-configured
  *   init   — Add desktop support to an existing Rails app
  *   dev    — Start the desktop app in development mode
  *   build  — Build the desktop app for distribution
  */
 
 import { execSync, spawn } from "child_process";
-import { existsSync, mkdirSync, writeFileSync, copyFileSync } from "fs";
+import { existsSync, mkdirSync, writeFileSync, copyFileSync, readFileSync, appendFileSync } from "fs";
 import { resolve, dirname, join } from "path";
 import { fileURLToPath } from "url";
 
@@ -20,6 +21,7 @@ const PACKAGE_ROOT = resolve(__dirname, "..");
 const [, , command, ...args] = process.argv;
 
 const COMMANDS = {
+  new: cmdNew,
   init: cmdInit,
   dev: cmdDev,
   build: cmdBuild,
@@ -41,6 +43,82 @@ handler(args);
 
 // ─── Commands ────────────────────────────────────────────────────────────────
 
+function cmdNew(args) {
+  const appName = args[0];
+
+  if (!appName) {
+    console.error("Usage: turbo-desktop new <appname>");
+    console.error("Example: turbo-desktop new myapp");
+    process.exit(1);
+  }
+
+  // Validate app name (no spaces, basic chars only)
+  if (!/^[a-zA-Z0-9_-]+$/.test(appName)) {
+    console.error("Error: App name must contain only letters, numbers, hyphens, and underscores.");
+    process.exit(1);
+  }
+
+  const appDir = resolve(appName);
+
+  if (existsSync(appDir)) {
+    console.error(`Error: Directory "${appName}" already exists.`);
+    process.exit(1);
+  }
+
+  // Check prerequisites
+  try {
+    execSync("rails --version", { stdio: "pipe" });
+  } catch {
+    console.error("Error: Rails is not installed. Install it with: gem install rails");
+    process.exit(1);
+  }
+
+  try {
+    execSync("rustc --version", { stdio: "pipe" });
+  } catch {
+    console.error("Error: Rust is not installed. Install it from https://rustup.rs");
+    process.exit(1);
+  }
+
+  // Step 1: Create the Rails app
+  console.log(`\nCreating Rails app: ${appName}...\n`);
+  execSync(`rails new ${appName} --skip-jbuilder`, { stdio: "inherit" });
+
+  // Step 2: Add the turbo_desktop-rails gem
+  console.log("\nAdding turbo_desktop-rails gem...");
+  const gemfilePath = join(appDir, "Gemfile");
+  const gemfileContent = readFileSync(gemfilePath, "utf-8");
+  if (!gemfileContent.includes("turbo_desktop-rails")) {
+    appendFileSync(gemfilePath, '\ngem "turbo_desktop-rails"\n');
+  }
+
+  // Step 3: Bundle install
+  console.log("\nInstalling gems...\n");
+  execSync("bundle install", { cwd: appDir, stdio: "inherit" });
+
+  // Step 4: Run the install generator
+  console.log("\nRunning turbo_desktop:install generator...\n");
+  execSync("bin/rails generate turbo_desktop:install", { cwd: appDir, stdio: "inherit" });
+
+  // Step 5: Scaffold the desktop shell
+  console.log("\nScaffolding desktop shell...\n");
+  cmdInit([appName]);
+
+  console.log(`
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Turbo Desktop app "${appName}" is ready!
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  cd ${appName}
+
+  # Terminal 1: Start Rails
+  bin/rails server
+
+  # Terminal 2: Start the desktop app
+  cd desktop && npx turbo-desktop dev
+`);
+}
+
 function cmdInit(args) {
   const projectDir = args[0] || ".";
   const desktopDir = resolve(projectDir, "desktop");
@@ -56,6 +134,7 @@ function cmdInit(args) {
   mkdirSync(desktopDir, { recursive: true });
   mkdirSync(join(desktopDir, "src-tauri", "src"), { recursive: true });
   mkdirSync(join(desktopDir, "src-tauri", "icons"), { recursive: true });
+  mkdirSync(join(desktopDir, "src-tauri", "capabilities"), { recursive: true });
   mkdirSync(join(desktopDir, "src"), { recursive: true });
 
   // Copy Rust source files
@@ -66,12 +145,32 @@ function cmdInit(args) {
     "bridge.rs",
     "menu.rs",
     "window.rs",
+    "tray.rs",
+    "deep_link.rs",
   ];
   for (const file of rustFiles) {
     copyFileSync(
       join(PACKAGE_ROOT, "src-tauri", "src", file),
       join(desktopDir, "src-tauri", "src", file)
     );
+  }
+
+  // Copy icons
+  const iconsDir = join(PACKAGE_ROOT, "src-tauri", "icons");
+  if (existsSync(iconsDir)) {
+    const iconFiles = ["32x32.png", "64x64.png", "128x128.png", "128x128@2x.png", "icon.icns", "icon.ico", "icon.png"];
+    for (const file of iconFiles) {
+      const src = join(iconsDir, file);
+      if (existsSync(src)) {
+        copyFileSync(src, join(desktopDir, "src-tauri", "icons", file));
+      }
+    }
+  }
+
+  // Copy capabilities
+  const capFile = join(PACKAGE_ROOT, "src-tauri", "capabilities", "main.json");
+  if (existsSync(capFile)) {
+    copyFileSync(capFile, join(desktopDir, "src-tauri", "capabilities", "main.json"));
   }
 
   // Copy Cargo.toml and build.rs
@@ -90,7 +189,7 @@ function cmdInit(args) {
     join(desktopDir, "src-tauri", "tauri.conf.json")
   );
 
-  // Copy JS bridge
+  // Copy JS bridge and supporting files
   copyFileSync(
     join(PACKAGE_ROOT, "src", "turbo-desktop.js"),
     join(desktopDir, "src", "turbo-desktop.js")
@@ -99,6 +198,12 @@ function cmdInit(args) {
     join(PACKAGE_ROOT, "src", "index.html"),
     join(desktopDir, "src", "index.html")
   );
+  if (existsSync(join(PACKAGE_ROOT, "src", "inspector.js"))) {
+    copyFileSync(
+      join(PACKAGE_ROOT, "src", "inspector.js"),
+      join(desktopDir, "src", "inspector.js")
+    );
+  }
 
   // Copy package.json
   copyFileSync(
@@ -205,7 +310,7 @@ function cmdDev(args) {
 function cmdBuild(args) {
   const target = args.includes("--target")
     ? args[args.indexOf("--target") + 1]
-    : "aarch64-apple-darwin";
+    : defaultBuildTarget();
 
   console.log(`Building Turbo Desktop for ${target}...`);
 
@@ -243,13 +348,15 @@ function cmdHelp() {
 turbo-desktop — Turbo Native for Desktop
 
 Commands:
-  init [path]              Add desktop support to a Rails app
+  new <appname>            Create a new Rails app with Turbo Desktop
+  init [path]              Add desktop support to an existing Rails app
   dev                      Start the desktop app in development mode
   build [--target <arch>]  Build for distribution (default: aarch64-apple-darwin)
   help                     Show this help message
 
 Examples:
-  turbo-desktop init .                     # Initialize in current directory
+  turbo-desktop new myapp                  # Create a new app from scratch
+  turbo-desktop init .                     # Add desktop to existing Rails app
   turbo-desktop dev                        # Start dev mode
   turbo-desktop build                      # Build for Apple Silicon
   turbo-desktop build --target universal-apple-darwin  # Universal binary
@@ -257,6 +364,15 @@ Examples:
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function defaultBuildTarget() {
+  const arch = process.arch === "arm64" ? "aarch64" : "x86_64";
+  const platform = process.platform;
+  if (platform === "darwin") return `${arch}-apple-darwin`;
+  if (platform === "win32") return `${arch}-pc-windows-msvc`;
+  if (platform === "linux") return `${arch}-unknown-linux-gnu`;
+  return `${arch}-apple-darwin`; // fallback
+}
 
 function guessAppName(projectDir) {
   const resolved = resolve(projectDir);

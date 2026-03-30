@@ -69,6 +69,28 @@
         margin: 0 auto 1rem;
       }
       @keyframes spin { to { transform: rotate(360deg); } }
+      .retry-status {
+        font-size: 0.8rem;
+        color: #666;
+        margin-top: 1rem;
+      }
+      .retry-status.connected {
+        color: #7ee787;
+      }
+      button {
+        background: linear-gradient(135deg, #e73c7e, #ee7752);
+        color: #fff;
+        border: none;
+        padding: 0.6rem 1.5rem;
+        border-radius: 8px;
+        font-size: 0.9rem;
+        font-weight: 600;
+        cursor: pointer;
+        margin-top: 1rem;
+        transition: opacity 0.2s;
+      }
+      button:hover { opacity: 0.85; }
+      button:disabled { opacity: 0.5; cursor: default; }
     </style>
   </head>
   <body>
@@ -87,10 +109,41 @@
       <div class="status">
         <h2>Quick Start</h2>
         <p>
-          <code>rails server</code> &mdash; then reload this window
+          <code>rails server</code> &mdash; the app will connect automatically
         </p>
       </div>
+      <button id="retryBtn" onclick="retryNow()">Retry Now</button>
+      <p class="retry-status" id="retryStatus">Retrying automatically every 3 seconds...</p>
     </div>
+    <script>
+      // Auto-retry: ping the server and redirect when it's available
+      const SERVER_URL = window.__TURBO_DESKTOP_SERVER_URL__ || "http://localhost:3000";
+      let retryInterval;
+
+      async function checkServer() {
+        try {
+          const resp = await fetch(SERVER_URL, { method: "HEAD", mode: "no-cors" });
+          // If fetch doesn't throw, the server is reachable
+          clearInterval(retryInterval);
+          const status = document.getElementById("retryStatus");
+          status.textContent = "Server detected! Redirecting...";
+          status.className = "retry-status connected";
+          document.getElementById("retryBtn").disabled = true;
+          window.location.replace(SERVER_URL);
+        } catch {
+          // Server still unreachable
+        }
+      }
+
+      function retryNow() {
+        document.getElementById("retryStatus").textContent = "Checking...";
+        checkServer();
+      }
+
+      retryInterval = setInterval(checkServer, 3000);
+      // Also try immediately
+      checkServer();
+    </script>
     <script src="turbo-desktop.js"></script>
   </body>
 </html>

@@ -1,0 +1,27 @@
+{
+  "name": "@turbo-desktop/bridge",
+  "version": "0.1.1",
+  "description": "JavaScript bridge for Turbo Desktop — typed imports for the turbo-desktop.js API",
+  "type": "module",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js"
+    }
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "README.md"
+  ],
+  "keywords": ["turbo", "hotwire", "rails", "tauri", "desktop", "bridge", "stimulus"],
+  "license": "MIT",
+  "homepage": "https://github.com/aguspe/turbo_desktop",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aguspe/turbo_desktop.git",
+    "directory": "packages/bridge"
+  }
+}

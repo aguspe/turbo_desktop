@@ -107,6 +107,166 @@
       // but we can emit a custom event for the Rust side to handle
       console.log("[turbo-desktop] DevTools toggle requested");
     },
+
+    // ─── Shell Execution API ─────────────────────────────────────────────────
+
+    shell: {
+      _listeners: new Map(),
+
+      async spawn(id, command, args = [], options = {}) {
+        return TurboDesktop.sendBridgeMessage("shell", "spawn", {
+          id,
+          command,
+          args,
+          env: options.env || {},
+          cwd: options.cwd || null,
+        });
+      },
+
+      async kill(id) {
+        return TurboDesktop.sendBridgeMessage("shell", "kill", { id });
+      },
+
+      async status(id) {
+        return TurboDesktop.sendBridgeMessage("shell", "status", { id });
+      },
+
+      async list() {
+        return TurboDesktop.sendBridgeMessage("shell", "list", {});
+      },
+
+      onOutput(id, callback) {
+        const handler = (event) => {
+          const payload = event.payload;
+          if (
+            payload &&
+            payload.component === "shell" &&
+            payload.data &&
+            payload.data.id === id
+          ) {
+            callback({
+              event: payload.event,
+              line: payload.data.line,
+              code: payload.data.code,
+            });
+          }
+        };
+
+        if (window.__TAURI_INTERNALS__?.event?.listen) {
+          const unlisten = window.__TAURI_INTERNALS__.event.listen(
+            "bridge-response",
+            handler
+          );
+          this._listeners.set(id, unlisten);
+        }
+      },
+
+      offOutput(id) {
+        const unlisten = this._listeners.get(id);
+        if (unlisten) {
+          unlisten.then((fn) => fn());
+          this._listeners.delete(id);
+        }
+      },
+    },
+
+    // ─── Sudo API ─────────────────────────────────────────────────────────────
+
+    sudo: {
+      async execute(command) {
+        return TurboDesktop.sendBridgeMessage("sudo", "execute", { command });
+      },
+
+      _listeners: new Map(),
+
+      async spawn(id, command) {
+        return TurboDesktop.sendBridgeMessage("sudo", "spawn", { id, command });
+      },
+
+      onOutput(id, callback) {
+        const handler = (event) => {
+          const payload = event.payload;
+          if (
+            payload &&
+            payload.component === "sudo" &&
+            payload.data &&
+            payload.data.id === id
+          ) {
+            callback({
+              event: payload.event,
+              line: payload.data.line,
+              code: payload.data.code,
+            });
+          }
+        };
+
+        if (window.__TAURI_INTERNALS__?.event?.listen) {
+          const unlisten = window.__TAURI_INTERNALS__.event.listen(
+            "bridge-response",
+            handler
+          );
+          this._listeners.set(id, unlisten);
+        }
+      },
+
+      offOutput(id) {
+        const unlisten = this._listeners.get(id);
+        if (unlisten) {
+          unlisten.then((fn) => fn());
+          this._listeners.delete(id);
+        }
+      },
+    },
+
+    // ─── Updater API ─────────────────────────────────────────────────────────
+
+    updater: {
+      async check() {
+        return TurboDesktop.sendBridgeMessage("updater", "check", {});
+      },
+
+      async downloadAndInstall() {
+        return TurboDesktop.sendBridgeMessage("updater", "download-and-install", {});
+      },
+    },
+
+    // ─── File System API ─────────────────────────────────────────────────────
+
+    fs: {
+      async read(path, encoding = "utf8") {
+        return TurboDesktop.sendBridgeMessage("filesystem", "read", {
+          path,
+          encoding,
+        });
+      },
+
+      async write(path, content, options = {}) {
+        return TurboDesktop.sendBridgeMessage("filesystem", "write", {
+          path,
+          content,
+          append: options.append || false,
+        });
+      },
+
+      async exists(path) {
+        return TurboDesktop.sendBridgeMessage("filesystem", "exists", { path });
+      },
+
+      async list(path) {
+        return TurboDesktop.sendBridgeMessage("filesystem", "list", { path });
+      },
+
+      async mkdir(path) {
+        return TurboDesktop.sendBridgeMessage("filesystem", "mkdir", { path });
+      },
+
+      async remove(path, options = {}) {
+        return TurboDesktop.sendBridgeMessage("filesystem", "remove", {
+          path,
+          recursive: options.recursive || false,
+        });
+      },
+    },
   };
 
   // ─── Turbo Drive Integration ───────────────────────────────────────────────
@@ -282,6 +442,31 @@
       }
     };
   };
+
+  // ─── Offline Detection ─────────────────────────────────────────────────────
+
+  /**
+   * Show a non-intrusive overlay when the connection to the server drops.
+   * Dismiss automatically when connectivity is restored.
+   */
+  window.addEventListener("offline", () => {
+    if (document.getElementById("turbo-desktop-offline-overlay")) return;
+    const overlay = document.createElement("div");
+    overlay.id = "turbo-desktop-offline-overlay";
+    overlay.style.cssText =
+      "position:fixed;bottom:0;left:0;right:0;padding:12px 20px;background:#1a1a2e;" +
+      "color:#e0e0e0;font-family:system-ui,sans-serif;font-size:14px;text-align:center;" +
+      "z-index:99999;border-top:2px solid #e73c7e;";
+    overlay.textContent = "Connection lost — waiting for server...";
+    document.body.appendChild(overlay);
+    console.warn("[turbo-desktop] Network offline detected");
+  });
+
+  window.addEventListener("online", () => {
+    const overlay = document.getElementById("turbo-desktop-offline-overlay");
+    if (overlay) overlay.remove();
+    console.log("[turbo-desktop] Network back online");
+  });
 
   // ─── Initial Setup ─────────────────────────────────────────────────────────
 

@@ -18,6 +18,7 @@
     "core:window:allow-is-maximized",
     "shell:allow-open",
     "notification:default",
-    "dialog:default"
+    "dialog:default",
+    "updater:default"
   ]
 }

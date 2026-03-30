@@ -53,6 +53,10 @@ pub async fn handle_bridge_message(
         "file-picker" => handle_file_picker(&app, &message).await,
         "badge" => handle_badge(&app, &message).await,
         "shortcut" => handle_shortcut(&app, &message).await,
+        "shell" => crate::shell_bridge::handle_shell(&app, &message).await,
+        "filesystem" => crate::fs_bridge::handle_filesystem(&app, &message).await,
+        "sudo" => crate::sudo_bridge::handle_sudo(&app, &message).await,
+        "updater" => crate::updater_bridge::handle_updater(&app, &message).await,
         _ => {
             // Forward unknown components as events — allows user-defined bridge components
             app.emit("bridge-message", &message)
@@ -123,16 +127,58 @@ async fn handle_file_picker(
     app: &tauri::AppHandle,
     message: &BridgeMessage,
 ) -> Result<serde_json::Value, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let title = message.data["title"].as_str().unwrap_or("Select");
+
     match message.event.as_str() {
-        "open" => {
-            app.emit("bridge-file-picker-open", &message.data)
-                .map_err(|e| format!("{}", e))?;
-            Ok(serde_json::json!({ "status": "opening" }))
+        "open-folder" | "open_folder" => {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            app.dialog()
+                .file()
+                .set_title(title)
+                .pick_folder(move |folder| {
+                    let path = folder.map(|f| f.to_string());
+                    let _ = tx.send(path);
+                });
+
+            match rx.await {
+                Ok(Some(path)) => Ok(serde_json::json!({ "status": "selected", "path": path })),
+                Ok(None) => Ok(serde_json::json!({ "status": "cancelled", "path": null })),
+                Err(e) => Err(format!("Dialog error: {}", e)),
+            }
+        }
+        "open" | "open-file" | "open_file" => {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            app.dialog()
+                .file()
+                .set_title(title)
+                .pick_file(move |file| {
+                    let path = file.map(|f| f.to_string());
+                    let _ = tx.send(path);
+                });
+
+            match rx.await {
+                Ok(Some(path)) => Ok(serde_json::json!({ "status": "selected", "path": path })),
+                Ok(None) => Ok(serde_json::json!({ "status": "cancelled", "path": null })),
+                Err(e) => Err(format!("Dialog error: {}", e)),
+            }
         }
         "save" => {
-            app.emit("bridge-file-picker-save", &message.data)
-                .map_err(|e| format!("{}", e))?;
-            Ok(serde_json::json!({ "status": "opening" }))
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            app.dialog()
+                .file()
+                .set_title(title)
+                .save_file(move |file| {
+                    let path = file.map(|f| f.to_string());
+                    let _ = tx.send(path);
+                });
+
+            match rx.await {
+                Ok(Some(path)) => Ok(serde_json::json!({ "status": "selected", "path": path })),
+                Ok(None) => Ok(serde_json::json!({ "status": "cancelled", "path": null })),
+                Err(e) => Err(format!("Dialog error: {}", e)),
+            }
         }
         _ => Ok(serde_json::json!({ "status": "unknown_event" })),
     }

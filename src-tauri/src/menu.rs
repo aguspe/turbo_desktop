@@ -3,24 +3,29 @@ use tauri::{
     Manager, Runtime,
 };
 
-/// Build the native macOS menu bar.
+/// Build the native menu bar.
 ///
-/// This provides the standard macOS menu structure that users expect:
-/// App menu (About, Quit), File, Edit (copy/paste), View (reload, devtools), Window, Help.
+/// On macOS this provides the full standard menu structure (About, Services, Hide, Quit).
+/// On Windows/Linux it provides a simpler menu (File > Quit).
 ///
 /// Bridge components can dynamically add items via the "menu-item" bridge component.
 pub fn build_menu<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<Menu<R>, tauri::Error> {
-    let app_menu = SubmenuBuilder::new(app, "Turbo Desktop")
-        .about(None)
-        .separator()
-        .services()
-        .separator()
-        .hide()
-        .hide_others()
-        .show_all()
-        .separator()
-        .quit()
-        .build()?;
+    let app_menu = {
+        let mut builder = SubmenuBuilder::new(app, "Turbo Desktop");
+        #[cfg(target_os = "macos")]
+        {
+            builder = builder
+                .about(None)
+                .separator()
+                .services()
+                .separator()
+                .hide()
+                .hide_others()
+                .show_all()
+                .separator();
+        }
+        builder.quit().build()?
+    };
 
     let file_menu = SubmenuBuilder::new(app, "File")
         .close_window()
