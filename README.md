@@ -35,6 +35,24 @@ Rails developers already have **Hotwire Native** (`turbo-ios` and `turbo-android
 
 **Turbo Desktop** fills this gap. It gives you a thin, native desktop shell powered by [Tauri 2](https://tauri.app) that treats your Rails app as the single source of truth — the same pattern you already know from Hotwire Native, but for the desktop.
 
+## Example App
+
+Here's what a Rails app looks like running inside Turbo Desktop (from the [example Task Manager app](https://github.com/aguspe/turbo_desktop_example_app)):
+
+<p align="center">
+  <img src="docs/screenshots/dashboard.png" alt="Dashboard — desktop features banner, stats, recent tasks" width="700" />
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/task-list.png" alt="Task list with priority badges and action buttons" width="700" />
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/new-task-modal.png" alt="New task form opened as a native modal window" width="550" />
+</p>
+
+> The "New Task" form opens as a **native modal window** — configured entirely through path configuration rules, no view changes needed.
+
 ## Features
 
 - **No new UI framework** — your existing Rails views, Turbo Frames, and Stimulus controllers just work
