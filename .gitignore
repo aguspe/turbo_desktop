@@ -1,1 +1,24 @@
+# Node
 node_modules/
+
+# Rust / Tauri build artifacts
+src-tauri/target/
+
+# Rails logs / tmp
+*.log
+turbo_desktop-rails/log/*
+!turbo_desktop-rails/log/.keep
+turbo_desktop-rails/tmp/
+
+# Editor / LSP caches
+.ruby-lsp/
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local scratch / test scaffolds
+debug_project/
+test_raider_project/
