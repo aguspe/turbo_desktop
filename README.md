@@ -269,6 +269,23 @@ The `turbo_desktop-rails` gem gives your Rails app awareness of the desktop shel
 | Binary size | System WebKit | ~20 MB | ~5-10 MB |
 | Platforms | iOS, iPadOS | Android | macOS, Windows, Linux |
 
+## Custom App Icon
+
+Your app ships with the default Turbo Desktop icon (in `src-tauri/icons/`). To use your own, run
+Tauri's icon generator on a single source image — it produces every size and format
+(`.png`, macOS `.icns`, Windows `.ico`, and mobile sets):
+
+```bash
+npm run tauri icon path/to/your-icon.png
+# or:  cargo tauri icon path/to/your-icon.png
+```
+
+Use a **square PNG, 1024×1024, with a transparent background**. The generator overwrites
+`src-tauri/icons/`, and `tauri.conf.json`'s `bundle.icon` already points at those files — so the next
+`cargo tauri build` (or tagged release) uses your icon automatically. No config changes needed.
+
+Prefer to do it by hand? Replace the files in `src-tauri/icons/` listed under `bundle.icon`.
+
 ## Distribution
 
 Ship native installers for macOS, Windows, and Linux by pushing a git tag — the
