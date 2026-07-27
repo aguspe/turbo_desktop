@@ -46,5 +46,21 @@ module TurboDesktop
     def turbo_web_only(&block)
       capture(&block) unless turbo_desktop_app?
     end
+
+    # Returns true when the Dev Inspector is enabled in configuration.
+    def turbo_desktop_inspector?
+      TurboDesktop.configuration.inspector_enabled
+    end
+
+    # Emits the <meta> tag that enables the Dev Inspector in the browser, or nil
+    # when the inspector is disabled. Place in your layout <head>; it is a no-op
+    # in production unless you explicitly enable the inspector there.
+    #
+    #   <%= turbo_desktop_inspector_meta_tag %>
+    def turbo_desktop_inspector_meta_tag
+      return nil unless turbo_desktop_inspector?
+
+      tag.meta(name: "turbo-desktop-inspector", content: "enabled")
+    end
   end
 end
