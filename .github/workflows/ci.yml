@@ -25,6 +25,21 @@ jobs:
           working-directory: turbo_desktop-rails
       - run: bundle exec rake test
 
+  lint:
+    name: RuboCop
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: turbo_desktop-rails
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+          working-directory: turbo_desktop-rails
+      - run: bundle exec rubocop --format github
+
   javascript:
     name: JavaScript Tests
     runs-on: ubuntu-latest

@@ -19,7 +19,7 @@ module TurboDesktop
           screenshots_enabled: false
         },
         rules: [
-          { patterns: ["/"], properties: { presentation: "default" } }
+          { patterns: [ "/" ], properties: { presentation: "default" } }
         ]
       }
     end
