@@ -36,7 +36,7 @@ class PathConfigurationsControllerTest < ActionDispatch::IntegrationTest
     assert body.key?("rules")
     assert_equal false, body["settings"]["screenshots_enabled"]
     assert_equal 1, body["rules"].length
-    assert_equal ["/"], body["rules"].first["patterns"]
+    assert_equal [ "/" ], body["rules"].first["patterns"]
     assert_equal "default", body["rules"].first["properties"]["presentation"]
   end
 
@@ -45,8 +45,8 @@ class PathConfigurationsControllerTest < ActionDispatch::IntegrationTest
       config.path_configuration = {
         settings: { screenshots_enabled: true },
         rules: [
-          { patterns: ["/new", "/edit"], properties: { presentation: "modal" } },
-          { patterns: ["/"], properties: { presentation: "default" } }
+          { patterns: [ "/new", "/edit" ], properties: { presentation: "modal" } },
+          { patterns: [ "/" ], properties: { presentation: "default" } }
         ]
       }
     end
