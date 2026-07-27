@@ -44,11 +44,17 @@ handler(args);
 // ─── Commands ────────────────────────────────────────────────────────────────
 
 function cmdNew(args) {
-  const appName = args[0];
+  const { iconPath, rest } = extractIconFlag(args);
+  const appName = rest[0];
 
   if (!appName) {
-    console.error("Usage: turbo-desktop new <appname>");
-    console.error("Example: turbo-desktop new myapp");
+    console.error("Usage: turbo-desktop new <appname> [--icon <file.png>]");
+    console.error("Example: turbo-desktop new myapp --icon ./logo.png");
+    process.exit(1);
+  }
+
+  if (iconPath && !existsSync(iconPath)) {
+    console.error(`Error: icon file not found: ${iconPath}`);
     process.exit(1);
   }
 
@@ -100,9 +106,9 @@ function cmdNew(args) {
   console.log("\nRunning turbo_desktop:install generator...\n");
   execSync("bin/rails generate turbo_desktop:install", { cwd: appDir, stdio: "inherit" });
 
-  // Step 5: Scaffold the desktop shell
+  // Step 5: Scaffold the desktop shell (forwarding a custom icon if given)
   console.log("\nScaffolding desktop shell...\n");
-  cmdInit([appName]);
+  cmdInit([appName, ...(iconPath ? ["--icon", iconPath] : [])]);
 
   console.log(`
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -120,8 +126,14 @@ function cmdNew(args) {
 }
 
 function cmdInit(args) {
-  const projectDir = args[0] || ".";
+  const { iconPath, rest } = extractIconFlag(args);
+  const projectDir = rest[0] || ".";
   const desktopDir = resolve(projectDir, "desktop");
+
+  if (iconPath && !existsSync(iconPath)) {
+    console.error(`Error: icon file not found: ${iconPath}`);
+    process.exit(1);
+  }
 
   console.log("Initializing Turbo Desktop in", desktopDir);
 
@@ -155,7 +167,7 @@ function cmdInit(args) {
     );
   }
 
-  // Copy icons
+  // Copy icons (the default Turbo Desktop icon set)
   const iconsDir = join(PACKAGE_ROOT, "src-tauri", "icons");
   if (existsSync(iconsDir)) {
     const iconFiles = ["32x32.png", "64x64.png", "128x128.png", "128x128@2x.png", "icon.icns", "icon.ico", "icon.png"];
@@ -164,6 +176,21 @@ function cmdInit(args) {
       if (existsSync(src)) {
         copyFileSync(src, join(desktopDir, "src-tauri", "icons", file));
       }
+    }
+  }
+
+  // Generate a custom icon set from --icon, overwriting the defaults. Best-effort:
+  // if tauri-cli isn't installed, keep the default icon and tell the user how to apply theirs.
+  if (iconPath) {
+    console.log(`\nGenerating app icons from ${iconPath}...`);
+    try {
+      execSync(`cargo tauri icon "${iconPath}"`, { cwd: desktopDir, stdio: "inherit" });
+    } catch {
+      console.warn(
+        "\n  Could not generate icons automatically (is tauri-cli installed?).\n" +
+        "  Your app keeps the default icon for now. To apply yours later, run:\n" +
+        `    cd ${join(projectDir, "desktop")} && cargo tauri icon "${iconPath}"\n`
+      );
     }
   }
 
@@ -348,22 +375,43 @@ function cmdHelp() {
 turbo-desktop — Turbo Native for Desktop
 
 Commands:
-  new <appname>            Create a new Rails app with Turbo Desktop
-  init [path]              Add desktop support to an existing Rails app
-  dev                      Start the desktop app in development mode
-  build [--target <arch>]  Build for distribution (default: aarch64-apple-darwin)
-  help                     Show this help message
+  new <appname> [--icon <file>]   Create a new Rails app with Turbo Desktop
+  init [path] [--icon <file>]     Add desktop support to an existing Rails app
+  dev                             Start the desktop app in development mode
+  build [--target <arch>]         Build for distribution (default: aarch64-apple-darwin)
+  help                            Show this help message
+
+Options:
+  --icon <file>   Use a custom app icon (square PNG, ideally 1024x1024). Generates
+                  all platform icon formats via tauri-cli.
 
 Examples:
-  turbo-desktop new myapp                  # Create a new app from scratch
-  turbo-desktop init .                     # Add desktop to existing Rails app
-  turbo-desktop dev                        # Start dev mode
-  turbo-desktop build                      # Build for Apple Silicon
+  turbo-desktop new myapp                      # Create a new app from scratch
+  turbo-desktop new myapp --icon ./logo.png    # ...with a custom icon
+  turbo-desktop init .                         # Add desktop to existing Rails app
+  turbo-desktop dev                            # Start dev mode
+  turbo-desktop build                          # Build for Apple Silicon
   turbo-desktop build --target universal-apple-darwin  # Universal binary
 `);
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+// Pull an optional `--icon <file>` flag out of args. Returns the resolved
+// absolute icon path (or null) and the remaining positional args.
+function extractIconFlag(args) {
+  const i = args.indexOf("--icon");
+  if (i === -1) return { iconPath: null, rest: args };
+
+  const value = args[i + 1];
+  if (!value || value.startsWith("--")) {
+    console.error("Error: --icon requires a path to an image (a square PNG, ideally 1024x1024).");
+    process.exit(1);
+  }
+
+  const rest = args.filter((_, idx) => idx !== i && idx !== i + 1);
+  return { iconPath: resolve(value), rest };
+}
 
 function defaultBuildTarget() {
   const arch = process.arch === "arm64" ? "aarch64" : "x86_64";
