@@ -9,6 +9,11 @@
 </p>
 
 <p align="center">
+  <strong>🌐 Official site: <a href="https://turbo-desktop.dev/">turbo-desktop.dev</a></strong>
+</p>
+
+<p align="center">
+  <a href="https://turbo-desktop.dev/">Website</a> •
   <a href="#features">Features</a> •
   <a href="#architecture">Architecture</a> •
   <a href="#quick-start">Quick Start</a> •
