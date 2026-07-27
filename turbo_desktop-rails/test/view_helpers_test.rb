@@ -18,8 +18,15 @@ class ViewHelpersTestHost
   def tag
     @tag ||= Class.new do
       def meta(**attrs)
-        pairs = attrs.map { |k, v| %(#{k.to_s.tr("_", "-")}="#{v}") }.join(" ")
-        "<meta #{pairs}>"
+        flat = []
+        attrs.each do |k, v|
+          if k == :data && v.is_a?(Hash)
+            v.each { |dk, dv| flat << %(data-#{dk.to_s.tr("_", "-")}="#{dv}") }
+          else
+            flat << %(#{k.to_s.tr("_", "-")}="#{v}")
+          end
+        end
+        "<meta #{flat.join(" ")}>"
       end
     end.new
   end
@@ -160,6 +167,8 @@ class ViewHelpersTest < Minitest::Test
     host = ViewHelpersTestHost.new(DESKTOP_UA)
     assert_includes host.turbo_desktop_inspector_meta_tag.to_s, "turbo-desktop-inspector"
     assert_includes host.turbo_desktop_inspector_meta_tag.to_s, "enabled"
+    # carries the same-origin inspector URL (fallback path outside a mounted app)
+    assert_includes host.turbo_desktop_inspector_meta_tag.to_s, 'data-inspector-url="/turbo-desktop/inspector.js"'
   ensure
     TurboDesktop.configuration.inspector_enabled = false
   end

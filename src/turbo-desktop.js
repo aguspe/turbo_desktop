@@ -497,9 +497,17 @@
   TurboDesktop._inspectorEnabled = inspectorEnabled;
 
   if (INVOKE && inspectorEnabled()) {
-    // The Tauri shell sets __TURBO_DESKTOP_INSPECTOR_URL__ to the injected
-    // asset URL; fall back to a relative path for bundled setups.
-    var inspectorUrl = window.__TURBO_DESKTOP_INSPECTOR_URL__ || "./inspector.js";
+    // Resolve the inspector entry URL, in priority order:
+    //   1. an explicit override global,
+    //   2. the same-origin URL the Rails gem advertises on the meta tag
+    //      (turbo_desktop_inspector_meta_tag → data-inspector-url), served by
+    //      the gem's engine so this import() is same-origin,
+    //   3. a relative fallback for setups that serve ./inspector.js themselves.
+    var inspectorMeta = document.querySelector('meta[name="turbo-desktop-inspector"]');
+    var inspectorUrl =
+      window.__TURBO_DESKTOP_INSPECTOR_URL__ ||
+      (inspectorMeta && inspectorMeta.dataset && inspectorMeta.dataset.inspectorUrl) ||
+      "./inspector.js";
     import(inspectorUrl)
       .then(function (m) { m.startInspector(TurboDesktop, { doc: document, win: window }); })
       .catch(function (e) { console.error("[turbo-desktop] inspector failed to load", e); });

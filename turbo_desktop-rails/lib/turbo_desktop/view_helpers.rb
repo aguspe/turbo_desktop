@@ -56,11 +56,22 @@ module TurboDesktop
     # when the inspector is disabled. Place in your layout <head>; it is a no-op
     # in production unless you explicitly enable the inspector there.
     #
+    # The tag also carries the same-origin URL of the inspector entry module
+    # (served by this engine) so the desktop shell's turbo-desktop.js can
+    # import() it instead of guessing a relative path.
+    #
     #   <%= turbo_desktop_inspector_meta_tag %>
     def turbo_desktop_inspector_meta_tag
       return nil unless turbo_desktop_inspector?
 
-      tag.meta(name: "turbo-desktop-inspector", content: "enabled")
+      tag.meta(name: "turbo-desktop-inspector", content: "enabled",
+               data: { inspector_url: turbo_desktop_inspector_url })
+    end
+
+    # Same-origin URL of the inspector entry module, under the engine's mount
+    # path (configurable via config.inspector_mount_path).
+    def turbo_desktop_inspector_url
+      "#{TurboDesktop.configuration.inspector_mount_path.chomp("/")}/inspector.js"
     end
   end
 end

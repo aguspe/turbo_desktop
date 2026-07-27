@@ -12,6 +12,23 @@ require "turbo_desktop/view_helpers"
 require "turbo_desktop/detection"
 require "turbo_desktop/configuration"
 
+# A single shared Rails app + mounted engine for integration tests. Booting
+# more than one Rails::Application in a process is not allowed, so any test that
+# needs routes (path-configuration, inspector assets) uses this one.
+require "rails"
+require "turbo_desktop/engine"
+
+class DummyApp < Rails::Application
+  config.eager_load = false
+  config.secret_key_base = "test-secret-key-base-for-turbo-desktop-tests"
+  config.hosts.clear
+end
+
+Rails.application.initialize! unless Rails.application.initialized?
+Rails.application.routes.draw do
+  mount TurboDesktop::Engine => "/turbo-desktop"
+end
+
 # Reset configuration between tests
 module ConfigurationReset
   def setup
