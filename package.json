@@ -9,6 +9,7 @@
     "turbo-desktop": "./cli/turbo-desktop.js"
   },
   "scripts": {
+    "tauri": "tauri",
     "dev": "cargo tauri dev",
     "build": "cargo tauri build",
     "build:apple-silicon": "cargo tauri build --target aarch64-apple-darwin",
