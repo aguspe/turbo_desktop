@@ -484,4 +484,24 @@
   window.TurboDesktop = TurboDesktop;
 
   console.log(`[turbo-desktop] v${TurboDesktop.version} initialized`);
+
+  // ─── Dev Inspector (lazy, dev-only) ──────────────────────────────────────
+  function inspectorEnabled() {
+    try {
+      if (window.localStorage && window.localStorage.getItem("td:inspector") === "1") return true;
+    } catch (_e) { /* storage may be blocked */ }
+    if (document.querySelector('meta[name="turbo-desktop-inspector"][content="enabled"]')) return true;
+    if (window.__TURBO_DESKTOP_INSPECTOR_ENABLED__ === true) return true;
+    return false;
+  }
+  TurboDesktop._inspectorEnabled = inspectorEnabled;
+
+  if (INVOKE && inspectorEnabled()) {
+    // The Tauri shell sets __TURBO_DESKTOP_INSPECTOR_URL__ to the injected
+    // asset URL; fall back to a relative path for bundled setups.
+    var inspectorUrl = window.__TURBO_DESKTOP_INSPECTOR_URL__ || "./inspector.js";
+    import(inspectorUrl)
+      .then(function (m) { m.startInspector(TurboDesktop, { doc: document, win: window }); })
+      .catch(function (e) { console.error("[turbo-desktop] inspector failed to load", e); });
+  }
 })();

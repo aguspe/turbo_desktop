@@ -106,4 +106,15 @@ class ConfigurationTest < Minitest::Test
     TurboDesktop.reset_configuration!
     assert_equal(/Turbo Desktop/, TurboDesktop.configuration.user_agent_pattern)
   end
+
+  def test_inspector_disabled_by_default
+    config = TurboDesktop::Configuration.new
+    refute config.inspector_enabled
+  end
+
+  def test_inspector_can_be_enabled
+    config = TurboDesktop::Configuration.new
+    config.inspector_enabled = true
+    assert config.inspector_enabled
+  end
 end

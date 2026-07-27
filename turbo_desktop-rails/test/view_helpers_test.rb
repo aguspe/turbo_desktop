@@ -13,6 +13,16 @@ class ViewHelpersTestHost
   def capture(&block)
     block.call
   end
+
+  # Minimal stub for Rails' tag.meta helper
+  def tag
+    @tag ||= Class.new do
+      def meta(**attrs)
+        pairs = attrs.map { |k, v| %(#{k.to_s.tr("_", "-")}="#{v}") }.join(" ")
+        "<meta #{pairs}>"
+      end
+    end.new
+  end
 end
 
 class ViewHelpersTest < Minitest::Test
@@ -135,5 +145,27 @@ class ViewHelpersTest < Minitest::Test
     host = ViewHelpersTestHost.new(DESKTOP_UA)
     result = host.turbo_web_only { "web content" }
     assert_nil result
+  end
+
+  def test_inspector_predicate_reflects_config
+    TurboDesktop.configuration.inspector_enabled = true
+    host = ViewHelpersTestHost.new(DESKTOP_UA)
+    assert host.turbo_desktop_inspector?
+  ensure
+    TurboDesktop.configuration.inspector_enabled = false
+  end
+
+  def test_inspector_meta_tag_present_when_enabled
+    TurboDesktop.configuration.inspector_enabled = true
+    host = ViewHelpersTestHost.new(DESKTOP_UA)
+    assert_includes host.turbo_desktop_inspector_meta_tag.to_s, "turbo-desktop-inspector"
+    assert_includes host.turbo_desktop_inspector_meta_tag.to_s, "enabled"
+  ensure
+    TurboDesktop.configuration.inspector_enabled = false
+  end
+
+  def test_inspector_meta_tag_absent_when_disabled
+    host = ViewHelpersTestHost.new(DESKTOP_UA)
+    assert_nil host.turbo_desktop_inspector_meta_tag
   end
 end

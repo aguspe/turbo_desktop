@@ -178,6 +178,32 @@ The Bridge is the desktop equivalent of **Strada**. It lets your web components 
 | `badge` | Set the dock/taskbar badge count |
 | `shortcut` | Register global keyboard shortcuts |
 
+### Dev Inspector
+
+In development, press **Cmd/Ctrl+Shift+D** to open the Dev Inspector — an in-app
+overlay that shows:
+
+- **Components** — every available bridge component, with a copy-pasteable
+  Rails + Stimulus snippet, and which are active on the current page
+- **Messages** — a live log of web↔native bridge traffic
+- **Navigation** — the path-configuration presentation applied to the current URL
+- **Shell** — platform, arch, version, and server URL
+
+Enable it from the Rails gem (added by the installer in development):
+
+```ruby
+# config/initializers/turbo_desktop.rb
+config.inspector_enabled = Rails.env.development?
+```
+
+```erb
+<%# app/views/layouts/application.html.erb, in <head> %>
+<%= turbo_desktop_inspector_meta_tag %>
+```
+
+Or flip it on against any build without a rebuild:
+`localStorage.setItem("td:inspector", "1")`.
+
 ### JavaScript Example
 
 ```javascript
