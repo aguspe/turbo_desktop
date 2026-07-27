@@ -264,6 +264,19 @@ The `turbo_desktop-rails` gem gives your Rails app awareness of the desktop shel
 | Binary size | System WebKit | ~20 MB | ~5-10 MB |
 | Platforms | iOS, iPadOS | Android | macOS, Windows, Linux |
 
+## Distribution
+
+Ship native installers for macOS, Windows, and Linux by pushing a git tag — the
+[release workflow](.github/workflows/release.yml) builds each OS and attaches the installers to a
+draft GitHub Release:
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+See **[docs/DISTRIBUTION.md](docs/DISTRIBUTION.md)** for local builds, using it in your own app,
+and the optional signing / auto-update setup.
+
 ## Project Structure
 
 ```
