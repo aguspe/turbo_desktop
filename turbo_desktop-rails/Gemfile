@@ -8,7 +8,3 @@ gem "rails", ">= 7.0"
 gem "turbo-rails", ">= 1.0"
 
 gem "rubocop-rails-omakase", require: false
-# Pin parallel < 2.1: 2.1.0 requires Ruby >= 3.3, which would break the
-# gem's supported Ruby 3.2 in CI. rubocop is dev-only, so it must not
-# raise the gem's Ruby floor.
-gem "parallel", "< 2.1", require: false
