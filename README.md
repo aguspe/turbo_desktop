@@ -286,6 +286,12 @@ Use a **square PNG, 1024×1024, with a transparent background**. The generator o
 
 Prefer to do it by hand? Replace the files in `src-tauri/icons/` listed under `bundle.icon`.
 
+**Starting a new app?** Brand it from the start — the CLI generates your icon during scaffolding:
+
+```bash
+npx turbo-desktop new myapp --icon ./logo.png
+```
+
 ## Distribution
 
 Ship native installers for macOS, Windows, and Linux by pushing a git tag — the
