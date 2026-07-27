@@ -1,26 +1,6 @@
 require "test_helper"
-require "action_controller"
-require "action_dispatch"
 
-# Build a minimal Rails app to test the controller in isolation
-require "rails"
-
-class TestApp < Rails::Application
-  config.eager_load = false
-  config.secret_key_base = "test-secret-key-base-for-turbo-desktop-tests"
-  config.hosts.clear
-end
-
-# Load the engine
-require "turbo_desktop/engine"
-
-TestApp.initialize!
-
-# Draw routes
-Rails.application.routes.draw do
-  mount TurboDesktop::Engine => "/turbo-desktop"
-end
-
+# Uses the shared app + mounted engine from test_helper.rb.
 class PathConfigurationsControllerTest < ActionDispatch::IntegrationTest
   def test_show_returns_json
     get "/turbo-desktop/path-configuration.json"
