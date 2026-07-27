@@ -6,4 +6,20 @@ Rake::TestTask.new(:test) do |t|
   t.test_files = FileList["test/**/*_test.rb"]
 end
 
+namespace :turbo_desktop do
+  desc "Vendor the Dev Inspector JS from the shell (../src) into the gem for same-origin serving"
+  task :sync_inspector do
+    require "fileutils"
+    shell_src = File.expand_path("../src", __dir__)
+    dest = File.expand_path("lib/turbo_desktop/inspector_assets", __dir__)
+    files = %w[inspector.js inspector/state.js inspector/panel.js inspector/bridge-tap.js inspector/catalog.js]
+    abort "shell src not found at #{shell_src}" unless File.directory?(shell_src)
+    files.each do |file|
+      FileUtils.mkdir_p(File.dirname(File.join(dest, file)))
+      FileUtils.cp(File.join(shell_src, file), File.join(dest, file))
+      puts "synced #{file}"
+    end
+  end
+end
+
 task default: :test
