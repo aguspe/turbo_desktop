@@ -47,9 +47,10 @@ project isn't at the repo root. Everything else (matrix, deps, draft release) wo
 
 ## Signing & notarization (recommended before shipping to real users)
 
-Unsigned builds trigger Gatekeeper (macOS) and SmartScreen (Windows) warnings. The workflow reads
-signing material from repo **secrets** — set them and builds sign automatically; leave them unset
-for unsigned builds.
+Unsigned builds trigger Gatekeeper (macOS) and SmartScreen (Windows) warnings. Builds are **unsigned
+by default** so a first release just works. To sign, **uncomment the signing block** in
+`release.yml` and set the matching repo **secrets** (don't leave the env set to empty secrets — an
+empty `APPLE_CERTIFICATE` makes Tauri try, and fail, to import an empty certificate).
 
 - **macOS** (Apple Developer ID + notarization): `APPLE_CERTIFICATE`,
   `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`,
@@ -76,5 +77,9 @@ Details: [Tauri updater](https://tauri.app/plugin/updater/).
 ## Status
 
 - ✅ Cross-OS installers via one tag (this workflow).
-- ⚙️ Signing / notarization — wired for secrets, you supply the certs.
+- ⚙️ Signing / notarization — opt-in (uncomment the block + supply certs).
 - ⚙️ Auto-update — plugin present, endpoints/keys not yet configured.
+
+---
+
+More at the official site: **[turbo-desktop.dev](https://turbo-desktop.dev/)**.
