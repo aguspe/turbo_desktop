@@ -266,7 +266,6 @@ PLATFORMS
 
 DEPENDENCIES
   minitest (~> 5.0)
-  parallel (< 2.1)
   rails (>= 7.0)
   rake
   rubocop-rails-omakase
