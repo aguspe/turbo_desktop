@@ -42,17 +42,10 @@ fn main() {
         .manage(app_config)
         .manage(process_manager::ProcessManager::new())
         // Inject turbo-desktop.js into every page load across all webviews.
-        // In debug builds, also inject the bridge inspector overlay.
         .on_page_load(|webview, payload| {
             if let PageLoadEvent::Finished = payload.event() {
                 let js = include_str!("../../src/turbo-desktop.js");
                 let _ = webview.eval(js);
-
-                #[cfg(debug_assertions)]
-                {
-                    let inspector_js = include_str!("../../src/inspector.js");
-                    let _ = webview.eval(inspector_js);
-                }
 
                 log::info!("Injected turbo-desktop.js into {}", payload.url());
             }
