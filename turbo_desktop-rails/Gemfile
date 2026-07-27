@@ -6,3 +6,5 @@ gem "rake"
 gem "minitest", "~> 5.0"
 gem "rails", ">= 7.0"
 gem "turbo-rails", ">= 1.0"
+
+gem "rubocop-rails-omakase", require: false
