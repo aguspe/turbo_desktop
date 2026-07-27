@@ -22,3 +22,15 @@ Thumbs.db
 # Local scratch / test scaffolds
 debug_project/
 test_raider_project/
+
+# Local clone of the separate example-app repo (github.com/aguspe/turbo_desktop_example_app)
+turbo_desktop_example_app/
+
+# Built gem artifacts — ship via RubyGems / GitHub Releases, not git
+turbo_desktop-rails/*.gem
+
+# Gem test scratch output
+turbo_desktop-rails/test/tmp/
+
+# Local desktop run config (per-app / per-user; not part of the shell source)
+/turbo-desktop.config.json
