@@ -17,7 +17,7 @@ class ConfigurationTest < Minitest::Test
     config = TurboDesktop::Configuration.new
     rules = config.path_configuration[:rules]
     assert_equal 1, rules.length
-    assert_equal ["/"], rules.first[:patterns]
+    assert_equal [ "/" ], rules.first[:patterns]
     assert_equal "default", rules.first[:properties][:presentation]
   end
 
@@ -34,7 +34,7 @@ class ConfigurationTest < Minitest::Test
     custom = {
       settings: { screenshots_enabled: true },
       rules: [
-        { patterns: ["/new"], properties: { presentation: "modal" } }
+        { patterns: [ "/new" ], properties: { presentation: "modal" } }
       ]
     }
     config.path_configuration = custom
@@ -57,8 +57,8 @@ class ConfigurationTest < Minitest::Test
     config.path_configuration = {
       settings: { screenshots_enabled: true },
       rules: [
-        { patterns: ["/modal"], properties: { presentation: "modal" } },
-        { patterns: ["/"], properties: { presentation: "default" } }
+        { patterns: [ "/modal" ], properties: { presentation: "modal" } },
+        { patterns: [ "/" ], properties: { presentation: "default" } }
       ]
     }
     parsed = JSON.parse(config.path_configuration_json)
@@ -78,7 +78,7 @@ class ConfigurationTest < Minitest::Test
   def test_configure_block_sets_path_configuration
     custom_rules = {
       settings: {},
-      rules: [{ patterns: ["/admin"], properties: { presentation: "native" } }]
+      rules: [ { patterns: [ "/admin" ], properties: { presentation: "native" } } ]
     }
     TurboDesktop.configure do |config|
       config.path_configuration = custom_rules
