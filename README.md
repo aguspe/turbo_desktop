@@ -82,16 +82,18 @@ npm install
 
 ### 2. Configure your Rails server URL
 
-Edit `turbo-desktop.toml`:
+Edit `turbo-desktop.config.json`:
 
-```toml
-[app]
-server_url = "http://localhost:3000"
-app_name   = "My App"
-
-[path_configuration]
-url = "http://localhost:3000/turbo-desktop/path-configuration.json"
+```json
+{
+  "server_url": "http://localhost:3000",
+  "app_name": "My App",
+  "path_configuration_url": "http://localhost:3000/turbo-desktop/path-configuration.json"
+}
 ```
+
+> `path_configuration_url` is optional — it defaults to
+> `{server_url}/turbo-desktop/path-configuration.json`.
 
 ### 3. Add the Rails gem
 

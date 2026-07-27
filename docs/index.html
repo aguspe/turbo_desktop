@@ -588,7 +588,7 @@
       <div class="step-content">
         <h3>The Tauri shell loads your Rails URL</h3>
         <p>
-          On launch, Rust reads <code>turbo-desktop.toml</code> for your <code>server_url</code>,
+          On launch, Rust reads <code>turbo-desktop.config.json</code> for your <code>server_url</code>,
           then navigates the main WebView window to that URL with <code>window.location.replace()</code>.
         </p>
         <pre><code><span class="cm">// main.rs — startup</span>
@@ -931,13 +931,12 @@ npm install</code></pre>
       <div class="step-number">2</div>
       <div class="step-content">
         <h3>Configure your Rails server URL</h3>
-        <p>Edit <code>turbo-desktop.toml</code> (or the relevant config) to point at your running Rails app:</p>
-        <pre><code>[app]
-server_url = <span class="st">"http://localhost:3000"</span>
-app_name   = <span class="st">"My App"</span>
-
-[path_configuration]
-url = <span class="st">"http://localhost:3000/turbo-desktop/path-configuration.json"</span></code></pre>
+        <p>Edit <code>turbo-desktop.config.json</code> to point at your running Rails app:</p>
+        <pre><code>{
+  <span class="st">"server_url"</span>: <span class="st">"http://localhost:3000"</span>,
+  <span class="st">"app_name"</span>: <span class="st">"My App"</span>,
+  <span class="st">"path_configuration_url"</span>: <span class="st">"http://localhost:3000/turbo-desktop/path-configuration.json"</span>
+}</code></pre>
       </div>
     </div>
 
