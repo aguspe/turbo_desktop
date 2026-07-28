@@ -10,6 +10,9 @@ const scriptSource = readFileSync(
   resolve(__dirname, "../src/turbo-desktop.js"),
   "utf-8"
 );
+const { version: packageVersion } = JSON.parse(
+  readFileSync(resolve(__dirname, "../package.json"), "utf-8")
+);
 
 /**
  * Create a fresh JSDOM window and execute the turbo-desktop script in it.
@@ -80,7 +83,7 @@ describe("TurboDesktop initialization", () => {
 
   it("sets version, platform, and isNative", () => {
     const { window } = createEnvironment();
-    assert.strictEqual(window.TurboDesktop.version, "0.1.0");
+    assert.strictEqual(window.TurboDesktop.version, packageVersion);
     assert.strictEqual(window.TurboDesktop.platform, "macos");
     assert.strictEqual(window.TurboDesktop.isNative, true);
   });

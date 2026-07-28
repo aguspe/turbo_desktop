@@ -85,9 +85,16 @@ async fn handle_spawn(
     // Create kill channel
     let (kill_tx, kill_rx) = tokio::sync::oneshot::channel::<()>();
 
-    // Register in process manager
-    pm.register(id.clone(), command.clone(), args.clone(), kill_tx)
-        .await;
+    // Register in process manager. If we are at the concurrency ceiling the child
+    // has already started, so stop it rather than leaving it untracked.
+    if let Err(e) = pm
+        .register(id.clone(), command.clone(), args.clone(), kill_tx)
+        .await
+    {
+        let _ = child.kill().await;
+        log::warn!("Shell: {}", e);
+        return Err(e);
+    }
 
     // Spawn the background streaming task
     let app_handle = app.clone();

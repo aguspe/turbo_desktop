@@ -100,6 +100,11 @@ Edit `turbo-desktop.config.json`:
 > `path_configuration_url` is optional — it defaults to
 > `{server_url}/turbo-desktop/path-configuration.json`.
 
+`server_url` is also the app's trust boundary: the bridge only answers calls from
+pages on that exact origin (scheme, host and port). A page from anywhere else —
+an off-site link, a redirect, an embedded frame — gets a refusal instead of
+native access. See [Bridge security](#bridge-security).
+
 ### 3. Add the Rails gem
 
 ```ruby
@@ -182,6 +187,47 @@ The Bridge is the desktop equivalent of **Strada**. It lets your web components 
 | `file-picker` | Open native file-open/save dialogs |
 | `badge` | Set the dock/taskbar badge count |
 | `shortcut` | Register global keyboard shortcuts |
+
+### Bridge security
+
+The bridge reaches the shell, the filesystem and (on macOS) administrator
+privileges, so it is closed by default and opened deliberately.
+
+**Origin.** Every bridge message is checked against `server_url` before it is
+dispatched. Only pages served from that origin can use the bridge.
+
+**Filesystem.** The `filesystem` component can only read and write under the
+roots you declare. With no configuration it is limited to the app's own data
+directory. Paths are resolved before the check, so `..` and symlinks cannot walk
+out of a root, and locations like `.ssh`, `.aws`, `.gnupg` and Rails
+`master.key` / `credentials.yml.enc` are refused even inside one.
+
+```json
+{
+  "filesystem": {
+    "allowed_roots": ["~/Projects", "~/.rbenv"]
+  }
+}
+```
+
+**Sudo.** The `sudo` component is off unless you enable it and name the commands
+it may run. A command is matched whole or as a prefix up to a word boundary, and
+anything containing shell metacharacters (`;`, `&&`, `|`, backticks, `$(...)`)
+is refused so an allowed prefix cannot be extended into a second command. Before
+the system password prompt — which does not say what is about to run, and caches
+your credential afterwards — the app shows the exact command and asks.
+
+```json
+{
+  "sudo": {
+    "enabled": true,
+    "allowed_commands": ["softwareupdate", "brew install"],
+    "confirm": true
+  }
+}
+```
+
+Set `confirm` to `false` only if your app already asks the user itself.
 
 ### Dev Inspector
 
