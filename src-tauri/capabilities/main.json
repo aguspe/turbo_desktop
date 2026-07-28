@@ -6,6 +6,15 @@
     "urls": ["http://localhost:*", "https://*"]
   },
   "permissions": [
+    "allow-handle-visit-proposal",
+    "allow-update-window-title",
+    "allow-page-loaded",
+    "allow-page-loading",
+    "allow-close-modal",
+    "allow-handle-bridge-message",
+    "allow-send-bridge-response",
+    "allow-retry-connection",
+    "allow-get-window-info",
     "core:default",
     "core:window:default",
     "core:window:allow-set-title",

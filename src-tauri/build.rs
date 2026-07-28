@@ -31,6 +31,26 @@ const DEFAULT_CONFIG: &str = r#"{
 }
 "#;
 
+/// Commands the web layer is allowed to call.
+///
+/// Tauri's ACL covers app-defined commands as well as plugin ones. Local pages
+/// get them for free, but content loaded over the network — which is the entire
+/// point of this shell — is refused with "not allowed. Plugin not found" unless
+/// each command has a permission and the capability grants it. Declaring them
+/// here generates `allow-<command>`; capabilities/main.json chooses which to
+/// hand out, and each command still checks the calling origin itself.
+const APP_COMMANDS: &[&str] = &[
+    "handle_visit_proposal",
+    "update_window_title",
+    "page_loaded",
+    "page_loading",
+    "close_modal",
+    "handle_bridge_message",
+    "send_bridge_response",
+    "retry_connection",
+    "get_window_info",
+];
+
 fn main() {
     // Relative to src-tauri/, matching the resource path in tauri.conf.json.
     let config = Path::new("../turbo-desktop.config.json");
@@ -42,5 +62,9 @@ fn main() {
 
     println!("cargo:rerun-if-changed=../turbo-desktop.config.json");
 
-    tauri_build::build()
+    tauri_build::try_build(
+        tauri_build::Attributes::new()
+            .app_manifest(tauri_build::AppManifest::new().commands(APP_COMMANDS)),
+    )
+    .expect("failed to run tauri-build");
 }
