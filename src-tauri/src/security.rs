@@ -82,6 +82,49 @@ pub fn ensure_trusted_caller(
     Err("Refused: this command is only available to the configured app origin".to_string())
 }
 
+/// Where a link should open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkDestination {
+    /// Load it in the app window.
+    App,
+    /// Hand it to the browser, mail client, or whatever else owns the scheme.
+    SystemBrowser,
+}
+
+/// Decide where a URL belongs.
+///
+/// The app's own origin loads in the window, as do bundled pages and any host
+/// the app has explicitly listed. Everything else is someone else's site and
+/// goes to the browser, which is how Hotwire Native treats off-origin links —
+/// without it, following a link to a payment provider or a terms page replaces
+/// your app in its own window and strands the person there.
+///
+/// Non-web schemes — `mailto:`, `tel:` and the like — always leave.
+pub fn destination_for(server_url: &str, internal_hosts: &[String], url: &Url) -> LinkDestination {
+    if is_trusted_origin(server_url, url) || is_bundled_app_origin(url) {
+        return LinkDestination::App;
+    }
+
+    if !matches!(url.scheme(), "http" | "https") {
+        return LinkDestination::SystemBrowser;
+    }
+
+    let Some(host) = url.host_str() else {
+        return LinkDestination::SystemBrowser;
+    };
+
+    // Exact host matches only. A suffix match would let evil-example.com
+    // through on the strength of example.com.
+    if internal_hosts
+        .iter()
+        .any(|allowed| allowed.trim().eq_ignore_ascii_case(host))
+    {
+        return LinkDestination::App;
+    }
+
+    LinkDestination::SystemBrowser
+}
+
 /// Home directory, honouring the Windows variable as well as `HOME`.
 fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME")
@@ -315,6 +358,87 @@ mod tests {
         assert!(!is_bundled_app_origin(&url("http://localhost:3000/")));
         // A host that merely ends with the bundled host must not pass.
         assert!(!is_bundled_app_origin(&url("https://evil.tauri.localhost.example.com/")));
+    }
+
+    fn destination(url_str: &str, internal: &[&str]) -> LinkDestination {
+        let hosts: Vec<String> = internal.iter().map(|h| h.to_string()).collect();
+        destination_for("https://app.example.com", &hosts, &url(url_str))
+    }
+
+    #[test]
+    fn the_app_loads_in_the_app_window() {
+        assert_eq!(
+            destination("https://app.example.com/orders/1", &[]),
+            LinkDestination::App
+        );
+        assert_eq!(
+            destination("tauri://localhost/error.html", &[]),
+            LinkDestination::App
+        );
+    }
+
+    #[test]
+    fn someone_elses_site_goes_to_the_browser() {
+        assert_eq!(
+            destination("https://news.example.org/article", &[]),
+            LinkDestination::SystemBrowser
+        );
+    }
+
+    #[test]
+    fn a_listed_host_may_load_in_the_app() {
+        let oauth = "https://accounts.google.com/o/oauth2/auth";
+
+        assert_eq!(
+            destination(oauth, &[]),
+            LinkDestination::SystemBrowser,
+            "an identity provider is off-origin like anything else until it is listed"
+        );
+        assert_eq!(
+            destination(oauth, &["accounts.google.com"]),
+            LinkDestination::App,
+            "listing it keeps the OAuth round trip in this webview, where the cookie belongs"
+        );
+    }
+
+    #[test]
+    fn listed_hosts_match_exactly() {
+        let hosts = vec!["example.com".to_string()];
+
+        // A host that merely ends with an allowed one must not pass.
+        assert_eq!(
+            destination_for(
+                "https://app.example.com",
+                &hosts,
+                &url("https://evil-example.com/")
+            ),
+            LinkDestination::SystemBrowser
+        );
+        assert_eq!(
+            destination_for(
+                "https://app.example.com",
+                &hosts,
+                &url("https://sub.example.com/")
+            ),
+            LinkDestination::SystemBrowser,
+            "a subdomain is a different host"
+        );
+        // Case should not matter.
+        assert_eq!(
+            destination_for("https://app.example.com", &hosts, &url("https://EXAMPLE.com/")),
+            LinkDestination::App
+        );
+    }
+
+    #[test]
+    fn non_web_schemes_always_leave() {
+        for link in ["mailto:hi@example.com", "tel:+15551234", "sms:+15551234"] {
+            assert_eq!(
+                destination(link, &[]),
+                LinkDestination::SystemBrowser,
+                "{link} should be handed to the system"
+            );
+        }
     }
 
     #[test]

@@ -27,6 +27,26 @@ pub struct TurboDesktopConfig {
     /// Whether — and which — commands may run with administrator privileges
     #[serde(default)]
     pub sudo: SudoConfig,
+    /// Where links are allowed to open
+    #[serde(default)]
+    pub navigation: NavigationConfig,
+}
+
+/// Which links stay in the app and which are handed to the browser.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct NavigationConfig {
+    /// Hosts other than the app's own that may load in the app window.
+    ///
+    /// Anything else goes to the system browser, matching how Hotwire Native
+    /// treats off-origin links. The usual reason to add one is an identity
+    /// provider: an OAuth round trip has to happen in this webview for the
+    /// session cookie to land in the right place.
+    ///
+    /// Loading in the app window is not the same as being trusted. The bridge
+    /// still answers only the app's own origin, so a host listed here can render
+    /// but cannot reach the shell.
+    #[serde(default)]
+    pub internal_hosts: Vec<String>,
 }
 
 /// Filesystem bridge policy.
@@ -139,6 +159,7 @@ fn default_config() -> TurboDesktopConfig {
         window: WindowConfig::default(),
         filesystem: FilesystemConfig::default(),
         sudo: SudoConfig::default(),
+        navigation: NavigationConfig::default(),
     }
 }
 

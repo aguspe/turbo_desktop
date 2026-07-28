@@ -24,6 +24,9 @@ const DEFAULT_CONFIG: &str = r#"{
     "enabled": false,
     "allowed_commands": [],
     "confirm": true
+  },
+  "navigation": {
+    "internal_hosts": []
   }
 }
 "#;
