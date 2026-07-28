@@ -146,13 +146,11 @@ function cmdNew(args) {
   Turbo Desktop app "${appName}" is ready!
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  cd ${appName}
+  cd ${appName}/desktop && npx turbo-desktop dev
 
-  # Terminal 1: Start Rails
-  bin/rails server
-
-  # Terminal 2: Start the desktop app
-  cd desktop && npx turbo-desktop dev
+  Opening the app starts the Rails server for you. To manage the
+  server yourself, remove "server.command" from
+  desktop/turbo-desktop.config.json and run bin/rails server first.
 `);
 }
 
@@ -193,6 +191,7 @@ function cmdInit(args) {
     "navigation.rs",
     "process_manager.rs",
     "security.rs",
+    "server.rs",
     "shell_bridge.rs",
     "sudo_bridge.rs",
     "tray.rs",
@@ -323,6 +322,12 @@ function cmdInit(args) {
     navigation: {
       internal_hosts: [],
     },
+    // Opening the app starts the Rails server too, from the project root one
+    // level above this config. Remove `command` to manage the server yourself.
+    server: {
+      command: "bin/rails server",
+      directory: "..",
+    },
   };
 
   writeFileSync(
@@ -350,10 +355,7 @@ Next steps:
        }
      end
 
-  4. Start your Rails server:
-     rails server
-
-  5. Start the desktop app:
+  4. Start the desktop app (it starts the Rails server too):
      cd desktop && turbo-desktop dev
 `);
 }

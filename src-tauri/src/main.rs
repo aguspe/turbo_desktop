@@ -10,6 +10,7 @@ mod menu;
 mod navigation;
 mod process_manager;
 mod security;
+mod server;
 mod shell_bridge;
 mod sudo_bridge;
 mod tray;
@@ -121,16 +122,44 @@ fn main() {
             // scripting a redirect away from it.
             let url: url::Url = server_url.parse().expect("Invalid server URL");
 
-            let reachable_at_startup = connection::server_is_reachable(&url);
+            // Start the app server before deciding what to show, so a configured
+            // app opens on its own rather than waiting for someone to run the
+            // server by hand. The waiting page and the connection monitor take it
+            // from here: the window moves to the app as soon as it answers.
+            let mut reachable_at_startup = connection::server_is_reachable(&url);
+            let config_dir = loaded.source.as_deref().and_then(|p| p.parent());
+
+            match server::decide(&shell_defaults.server, reachable_at_startup) {
+                server::Decision::Start => {
+                    let handle = app.handle().clone();
+                    let server_config = shell_defaults.server.clone();
+                    let dir = config_dir.map(|d| d.to_path_buf());
+
+                    if let Err(e) = tauri::async_runtime::block_on(server::start(
+                        &handle,
+                        &server_config,
+                        dir.as_deref(),
+                    )) {
+                        log::warn!("{}", e);
+                    }
+
+                    // Not reachable yet — it has only just been asked to start.
+                    reachable_at_startup = false;
+                }
+                server::Decision::AlreadyRunning => {
+                    log::info!("A server is already answering; leaving it alone")
+                }
+                server::Decision::NotConfigured => {}
+            }
+
             let target = if reachable_at_startup {
                 WebviewUrl::External(url.clone())
             } else {
-                log::warn!("Could not reach {} — opening the error page instead", url);
+                log::info!("Waiting for {}", url);
                 WebviewUrl::App(
                     format!("error.html?error={}", VisitError::NetworkFailure.slug()).into(),
                 )
             };
-
 
             let main_window = window::apply_shell_defaults(
                 WebviewWindowBuilder::new(app, "main", target),
