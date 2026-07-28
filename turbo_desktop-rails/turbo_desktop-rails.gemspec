@@ -11,7 +11,10 @@ Gem::Specification.new do |spec|
   spec.homepage      = "https://github.com/aguspe/turbo_desktop"
   spec.license       = "MIT"
 
-  spec.required_ruby_version = ">= 3.3.0"
+  # Rails 8's own floor. Anything higher and Bundler quietly resolves back to
+  # 0.0.1 for people on 3.2 — a version predating the install generator — rather
+  # than telling them the gem does not support their Ruby.
+  spec.required_ruby_version = ">= 3.2.0"
 
   spec.metadata["homepage_uri"]      = spec.homepage
   spec.metadata["source_code_uri"]   = spec.homepage

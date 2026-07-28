@@ -104,7 +104,10 @@ function cmdNew(args) {
   const gemfilePath = join(appDir, "Gemfile");
   const gemfileContent = readFileSync(gemfilePath, "utf-8");
   if (!gemfileContent.includes("turbo_desktop-rails")) {
-    appendFileSync(gemfilePath, '\ngem "turbo_desktop-rails"\n');
+    // Constrained on purpose. Unpinned, Bundler quietly resolves back to an
+    // ancient version when the current one does not support the running Ruby,
+    // and the failure only shows up later as a missing generator.
+    appendFileSync(gemfilePath, '\ngem "turbo_desktop-rails", "~> 0.1"\n');
   }
 
   // Steps 3 and 4 run other people's tools against a Rails app that already
