@@ -52,16 +52,37 @@ const APP_COMMANDS: &[&str] = &[
     "get_window_info",
 ];
 
-fn main() {
-    // Relative to src-tauri/, matching the resource path in tauri.conf.json.
-    let config = Path::new("../turbo-desktop.config.json");
+/// Path configuration bundled with the app.
+///
+/// The server's copy replaces this once it answers, and the last one it gave is
+/// cached for the launch after that. This is what the app routes by before
+/// either exists — on first run, or on a cold start with the server down.
+const DEFAULT_PATH_CONFIG: &str = r#"{
+  "rules": [
+    { "patterns": ["/"], "properties": { "presentation": "default" } }
+  ]
+}
+"#;
 
-    if !config.exists() {
-        std::fs::write(config, DEFAULT_CONFIG).expect("could not write a default app config");
-        println!("cargo:warning=No turbo-desktop.config.json found; wrote a default one.");
+fn write_if_absent(path: &Path, contents: &str, what: &str) {
+    if path.exists() {
+        return;
     }
 
+    std::fs::write(path, contents).unwrap_or_else(|e| panic!("could not write {what}: {e}"));
+    println!("cargo:warning=No {what} found; wrote a default one.");
+}
+
+fn main() {
+    // Relative to src-tauri/, matching the resource paths in tauri.conf.json.
+    let config = Path::new("../turbo-desktop.config.json");
+    let path_config = Path::new("../path-configuration.json");
+
+    write_if_absent(config, DEFAULT_CONFIG, "turbo-desktop.config.json");
+    write_if_absent(path_config, DEFAULT_PATH_CONFIG, "path-configuration.json");
+
     println!("cargo:rerun-if-changed=../turbo-desktop.config.json");
+    println!("cargo:rerun-if-changed=../path-configuration.json");
 
     tauri_build::try_build(
         tauri_build::Attributes::new()

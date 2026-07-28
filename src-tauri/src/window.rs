@@ -694,8 +694,8 @@ pub fn apply_shell_defaults<'a, M: tauri::Manager<tauri::Wry>>(
 /// surface to one function, and works without the frontend bundling anything.
 ///
 /// Both arguments are JSON-encoded, so neither can break out of the call.
-pub fn deliver_to_page(
-    window: &tauri::WebviewWindow,
+pub fn deliver_to_page<R: tauri::Runtime>(
+    window: &tauri::WebviewWindow<R>,
     kind: &str,
     payload: &serde_json::Value,
 ) {
@@ -711,7 +711,11 @@ pub fn deliver_to_page(
 }
 
 /// Deliver to every open webview.
-pub fn deliver_to_all(app: &tauri::AppHandle, kind: &str, payload: &serde_json::Value) {
+pub fn deliver_to_all<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    kind: &str,
+    payload: &serde_json::Value,
+) {
     use tauri::Manager;
 
     for window in app.webview_windows().values() {

@@ -78,6 +78,23 @@ fn main() {
             // Shared as an Arc so the background fetch task can hold on to it.
             let config_store = Arc::new(PathConfigurationStore::new());
             let config_store_for_fetch = config_store.clone();
+
+            // Start with rules rather than none: the copy the server gave us last
+            // time, or the one shipped in the bundle. The fetch below replaces
+            // them when it succeeds.
+            let cache_dir = app.path().app_config_dir().ok();
+            let resource_dir = app.path().resource_dir().ok();
+            match config::startup_configuration(cache_dir.as_deref(), resource_dir.as_deref()) {
+                Some((path_config, source)) => {
+                    log::info!(
+                        "Path configuration: {} rules from the {:?}",
+                        path_config.rules.len(),
+                        source
+                    );
+                    config_store.set(path_config);
+                }
+                None => log::info!("No path configuration yet; asking the server"),
+            }
             app.manage(config_store);
             app.manage(app_config);
 
@@ -145,15 +162,24 @@ fn main() {
             let pc_url = path_config_url.clone();
             let pc_user_agent = user_agent.clone();
             let store = config_store_for_fetch.clone();
+            let pc_cache_dir = cache_dir.clone();
             tauri::async_runtime::spawn(async move {
                 match config::fetch_path_configuration(&pc_url, &pc_user_agent).await {
                     Ok(pc) => {
-                        log::info!("Path configuration loaded: {} rules", pc.rules.len());
+                        log::info!("Path configuration: {} rules from the server", pc.rules.len());
+
+                        // Keep it for the next launch before handing it over.
+                        if let Some(dir) = &pc_cache_dir {
+                            if let Err(e) = config::save_cache(dir, &pc) {
+                                log::warn!("{}", e);
+                            }
+                        }
+
                         store.set(pc);
                     }
                     Err(e) => {
                         log::warn!("Could not fetch path configuration: {}", e);
-                        log::info!("Using default path configuration (all routes -> default)");
+                        log::info!("Keeping the rules already loaded");
                     }
                 }
             });
