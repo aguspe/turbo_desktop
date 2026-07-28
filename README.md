@@ -525,6 +525,20 @@ export default class extends TurboDesktop.stimulusBridge(Controller, "notificati
 }
 ```
 
+### Desktop-only templates
+
+Requests from the desktop app carry a Rails variant, so an entire template can be
+written for it instead of branching inside a shared one:
+
+```
+app/views/orders/show.html.erb           # everyone
+app/views/orders/show.html+desktop.erb   # the desktop app
+```
+
+Layouts too (`layouts/application.html+desktop.erb`). Rails falls back to the
+plain template wherever no variant exists, so it costs nothing until you add one.
+Rename it with `config.variant`, or set it to `nil` to leave variants alone.
+
 ### Rails View Helpers
 
 ```erb
