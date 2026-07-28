@@ -13,10 +13,13 @@
     "dev": "cargo tauri dev",
     "build": "cargo tauri build",
     "build:apple-silicon": "cargo tauri build --target aarch64-apple-darwin",
-    "test": "node --test"
+    "test": "node --test",
+    "lint": "eslint ."
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@tauri-apps/cli": "^2.0.0",
+    "eslint": "^10.8.0",
     "jsdom": "^29.0.1"
   },
   "dependencies": {

@@ -359,9 +359,14 @@ turbo_desktop/
 ├── src-tauri/              # Rust / Tauri shell
 │   └── src/
 │       ├── main.rs         # App entry point
+│       ├── security.rs     # Origin, filesystem and sudo policy
 │       ├── navigation.rs   # Visit proposals & path config routing
-│       ├── bridge.rs       # Bridge component handlers
-│       └── window.rs       # Window management
+│       ├── bridge.rs       # Bridge dispatch
+│       ├── shell_bridge.rs # Process spawning
+│       ├── fs_bridge.rs    # Scoped filesystem access
+│       ├── sudo_bridge.rs  # Privileged commands
+│       ├── config.rs       # Path configuration
+│       └── window.rs       # Window management & app config
 ├── turbo_desktop-rails/    # Rails gem
 ├── cli/                    # CLI scaffolding tool
 ├── templates/              # Project templates
