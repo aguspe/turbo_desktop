@@ -110,6 +110,28 @@ the `window` block all take effect. `user_agent` **replaces** the webview's own
 string rather than extending it, so keep the `Turbo Desktop` token — the Rails
 gem's `turbo_desktop_app?` and the `turbo_desktop_only` helper match on it.
 
+#### Where the config is read from
+
+This file carries the app's trust boundary, so where it is read from matters:
+
+- **In development**, it is read from the project you run in — the working
+  directory or one level up, so both `turbo-desktop dev` and `cargo tauri dev`
+  find it. If there is none, the app starts on defaults.
+- **In a packaged app**, it is read only from inside the bundle
+  (`Contents/Resources` on macOS), never from the working directory, and the app
+  **refuses to start** if it is missing. It ships there via `bundle.resources` in
+  `tauri.conf.json`, and `turbo-desktop build` includes it automatically.
+
+A config that exists but does not parse is always fatal, in both cases.
+
+The reason for the split is that a writable config is a way around every other
+protection here: `server_url` decides which origin the bridge trusts, and the
+filesystem roots and sudo allowlist sit in the same file. Reading it from the
+working directory of a shipped app would let anyone who can write a file next to
+it grant themselves shell and sudo access. Note that the bundle only becomes
+tamper-*resistant* once you sign the app — see
+[Signing & notarization](#distribution).
+
 If the server is not reachable when the app launches, it opens a bundled page
 that waits and redirects once your server answers.
 

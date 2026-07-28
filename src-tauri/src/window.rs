@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 /// Desktop app configuration loaded from turbo-desktop.config.json.
 /// This file lives in the Rails project root (or wherever the user runs `turbo-desktop init`).
@@ -124,24 +125,276 @@ fn default_true() -> bool {
     true
 }
 
-/// Load the turbo-desktop.config.json from the current directory or a specified path.
-pub fn load_config(path: Option<&str>) -> Result<TurboDesktopConfig, String> {
-    let config_path = path.unwrap_or("turbo-desktop.config.json");
+/// Name of the configuration file, in the project during development and in the
+/// bundle's resource directory once the app ships.
+pub const CONFIG_FILENAME: &str = "turbo-desktop.config.json";
 
-    // Try the given path, then fall back to a bundled default
-    if let Ok(contents) = std::fs::read_to_string(config_path) {
-        serde_json::from_str(&contents).map_err(|e| format!("Invalid config: {}", e))
-    } else {
-        // Default config pointing to localhost for development
-        Ok(TurboDesktopConfig {
-            server_url: "http://localhost:3000".into(),
-            path_configuration_url: None,
-            app_name: "Turbo Desktop".into(),
-            user_agent: default_user_agent(),
-            window: WindowConfig::default(),
-            filesystem: FilesystemConfig::default(),
-            sudo: SudoConfig::default(),
-        })
+/// Development defaults, used only when a debug build finds no config at all.
+fn default_config() -> TurboDesktopConfig {
+    TurboDesktopConfig {
+        server_url: "http://localhost:3000".into(),
+        path_configuration_url: None,
+        app_name: "Turbo Desktop".into(),
+        user_agent: default_user_agent(),
+        window: WindowConfig::default(),
+        filesystem: FilesystemConfig::default(),
+        sudo: SudoConfig::default(),
+    }
+}
+
+pub fn parse_config(contents: &str) -> Result<TurboDesktopConfig, String> {
+    serde_json::from_str(contents).map_err(|e| e.to_string())
+}
+
+/// A loaded configuration and where it came from.
+#[derive(Debug)]
+pub struct LoadedConfig {
+    pub config: TurboDesktopConfig,
+    /// `None` when a development build fell back to defaults.
+    pub source: Option<PathBuf>,
+}
+
+/// Where to look for the configuration, and how strict to be about finding it.
+///
+/// The file carries the app's trust boundary — `server_url` decides which origin
+/// may call the bridge, and the filesystem and sudo policies live beside it — so a
+/// shipped app reads it from inside its own bundle and refuses to start without
+/// it. Falling back to defaults there would silently widen or move that boundary.
+/// Development builds are looser: they read the project you are running from, and
+/// tolerate its absence so a fresh clone still starts.
+pub struct ConfigLookup {
+    pub working_dir: Option<PathBuf>,
+    pub resource_dir: Option<PathBuf>,
+    pub development: bool,
+}
+
+impl ConfigLookup {
+    pub fn for_app<R: tauri::Runtime>(app: &tauri::App<R>) -> Self {
+        use tauri::Manager;
+
+        Self {
+            working_dir: std::env::current_dir().ok(),
+            resource_dir: app.path().resource_dir().ok(),
+            development: cfg!(debug_assertions),
+        }
+    }
+
+    /// Candidate paths, most specific first.
+    pub fn search_paths(&self) -> Vec<PathBuf> {
+        let mut paths = Vec::new();
+
+        if self.development {
+            if let Some(dir) = &self.working_dir {
+                // The project root, and one level up for `cargo tauri dev`, which
+                // runs with src-tauri as the working directory.
+                paths.push(dir.join(CONFIG_FILENAME));
+                if let Some(parent) = dir.parent() {
+                    paths.push(parent.join(CONFIG_FILENAME));
+                }
+            }
+        }
+
+        if let Some(dir) = &self.resource_dir {
+            paths.push(dir.join(CONFIG_FILENAME));
+        }
+
+        paths
+    }
+
+    pub fn load(&self) -> Result<LoadedConfig, String> {
+        let paths = self.search_paths();
+
+        for path in &paths {
+            let Ok(contents) = std::fs::read_to_string(path) else {
+                continue;
+            };
+
+            // A config that exists but does not parse is always fatal — silently
+            // falling back would hide a typo in the security policy.
+            let config = parse_config(&contents)
+                .map_err(|e| format!("{} is not valid JSON for this app: {}", path.display(), e))?;
+
+            return Ok(LoadedConfig {
+                config,
+                source: Some(path.clone()),
+            });
+        }
+
+        if self.development {
+            return Ok(LoadedConfig {
+                config: default_config(),
+                source: None,
+            });
+        }
+
+        Err(format!(
+            "No {} found. Looked in: {}. A packaged app must ship this file in its \
+             resource directory — add it to bundle.resources in tauri.conf.json.",
+            CONFIG_FILENAME,
+            paths
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("turbo-desktop-config-{name}"));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn write_config(dir: &Path, server_url: &str) {
+        std::fs::write(
+            dir.join(CONFIG_FILENAME),
+            format!(r#"{{"server_url":"{server_url}"}}"#),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_release_build_only_looks_in_the_bundle() {
+        let lookup = ConfigLookup {
+            working_dir: Some(PathBuf::from("/some/cwd")),
+            resource_dir: Some(PathBuf::from("/app/Resources")),
+            development: false,
+        };
+
+        assert_eq!(
+            lookup.search_paths(),
+            vec![PathBuf::from("/app/Resources").join(CONFIG_FILENAME)],
+            "a packaged app must not read a config from its working directory"
+        );
+    }
+
+    #[test]
+    fn a_development_build_also_looks_beside_and_above_the_working_directory() {
+        let lookup = ConfigLookup {
+            working_dir: Some(PathBuf::from("/project/src-tauri")),
+            resource_dir: Some(PathBuf::from("/app/Resources")),
+            development: true,
+        };
+
+        assert_eq!(
+            lookup.search_paths(),
+            vec![
+                PathBuf::from("/project/src-tauri").join(CONFIG_FILENAME),
+                PathBuf::from("/project").join(CONFIG_FILENAME),
+                PathBuf::from("/app/Resources").join(CONFIG_FILENAME),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_release_build_refuses_to_start_without_a_config() {
+        let dir = scratch("release-missing");
+        let lookup = ConfigLookup {
+            working_dir: Some(dir.clone()),
+            resource_dir: Some(dir.join("empty")),
+            development: false,
+        };
+
+        let err = lookup
+            .load()
+            .expect_err("a packaged app should refuse to start with no config");
+        assert!(err.contains("No turbo-desktop.config.json"), "got: {err}");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_development_build_falls_back_to_defaults() {
+        let dir = scratch("dev-missing");
+        let lookup = ConfigLookup {
+            working_dir: Some(dir.join("empty")),
+            resource_dir: None,
+            development: true,
+        };
+
+        let loaded = lookup.load().expect("development should tolerate no config");
+        assert_eq!(loaded.config.server_url, "http://localhost:3000");
+        assert!(loaded.source.is_none());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_bundled_config_is_used_when_present() {
+        let dir = scratch("release-present");
+        write_config(&dir, "https://app.example.com");
+
+        let lookup = ConfigLookup {
+            working_dir: None,
+            resource_dir: Some(dir.clone()),
+            development: false,
+        };
+
+        let loaded = lookup.load().expect("the bundled config should load");
+        assert_eq!(loaded.config.server_url, "https://app.example.com");
+        assert_eq!(loaded.source, Some(dir.join(CONFIG_FILENAME)));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_working_directory_wins_during_development() {
+        let dir = scratch("dev-precedence");
+        let project = dir.join("project");
+        let resources = dir.join("resources");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::create_dir_all(&resources).unwrap();
+        write_config(&project, "http://localhost:4000");
+        write_config(&resources, "https://bundled.example.com");
+
+        let lookup = ConfigLookup {
+            working_dir: Some(project),
+            resource_dir: Some(resources),
+            development: true,
+        };
+
+        assert_eq!(
+            lookup.load().unwrap().config.server_url,
+            "http://localhost:4000",
+            "the project you are running from should win in development"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_malformed_config_is_fatal_even_in_development() {
+        let dir = scratch("malformed");
+        std::fs::write(dir.join(CONFIG_FILENAME), "{ not json").unwrap();
+
+        let lookup = ConfigLookup {
+            working_dir: Some(dir.clone()),
+            resource_dir: None,
+            development: true,
+        };
+
+        let err = lookup
+            .load()
+            .expect_err("a config that does not parse must not fall back to defaults");
+        assert!(err.contains("not valid JSON"), "got: {err}");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_security_policy_defaults_closed_when_a_config_omits_it() {
+        let config = parse_config(r#"{"server_url":"https://app.example.com"}"#).unwrap();
+
+        assert!(!config.sudo.enabled);
+        assert!(config.sudo.allowed_commands.is_empty());
+        assert!(config.filesystem.allowed_roots.is_empty());
     }
 }
 
