@@ -67,21 +67,13 @@ pub async fn handle_visit_proposal(
             })
         }
         Presentation::Modal => {
-            // Open in a modal window
-            let label = format!("modal-{}", uuid_simple());
-            let window = WebviewWindowBuilder::new(
+            open_child_window(
                 &app,
-                &label,
-                WebviewUrl::External(same_origin_url(&app, &proposal.url)?),
-            )
-            .title(properties.title.unwrap_or_else(|| "".into()))
-            .inner_size(800.0, 600.0)
-            .resizable(true)
-            .build()
-            .map_err(|e| format!("Failed to create modal window: {}", e))?;
-
-            // Inject our bridge JS into the new window
-            inject_turbo_desktop_js(&window);
+                &proposal.url,
+                &format!("modal-{}", uuid_simple()),
+                properties.title.clone().unwrap_or_default(),
+                (properties.width.unwrap_or(800.0), properties.height.unwrap_or(600.0)),
+            )?;
 
             Ok(VisitResponse {
                 action: "none".into(),
@@ -89,20 +81,13 @@ pub async fn handle_visit_proposal(
             })
         }
         Presentation::NewWindow => {
-            // Open in a completely new window
-            let label = format!("window-{}", uuid_simple());
-            let window = WebviewWindowBuilder::new(
+            open_child_window(
                 &app,
-                &label,
-                WebviewUrl::External(same_origin_url(&app, &proposal.url)?),
-            )
-            .title(properties.title.unwrap_or_else(|| "Turbo Desktop".into()))
-            .inner_size(1200.0, 800.0)
-            .resizable(true)
-            .build()
-            .map_err(|e| format!("Failed to create new window: {}", e))?;
-
-            inject_turbo_desktop_js(&window);
+                &proposal.url,
+                &format!("window-{}", uuid_simple()),
+                properties.title.clone().unwrap_or_else(|| "Turbo Desktop".into()),
+                (properties.width.unwrap_or(1200.0), properties.height.unwrap_or(800.0)),
+            )?;
 
             Ok(VisitResponse {
                 action: "none".into(),
@@ -146,6 +131,37 @@ fn same_origin_url(app: &tauri::AppHandle, raw: &str) -> Result<url::Url, String
             raw
         ))
     }
+}
+
+/// Open a modal or secondary window carrying the shell's configuration.
+///
+/// Both presentations differ only in their label, title and default size, and
+/// both need everything the main window has — the user agent, external-link
+/// handling and the globals the injected script reads.
+fn open_child_window(
+    app: &tauri::AppHandle,
+    raw_url: &str,
+    label: &str,
+    title: String,
+    (width, height): (f64, f64),
+) -> Result<(), String> {
+    let url = same_origin_url(app, raw_url)?;
+    let config = app.state::<crate::window::TurboDesktopConfig>();
+
+    let window = crate::window::apply_shell_defaults(
+        WebviewWindowBuilder::new(app, label, WebviewUrl::External(url)),
+        app,
+        &config,
+        label,
+    )
+    .title(title)
+    .inner_size(width, height)
+    .resizable(true)
+    .build()
+    .map_err(|e| format!("Failed to create window '{}': {}", label, e))?;
+
+    inject_turbo_desktop_js(&window);
+    Ok(())
 }
 
 /// Whether this proposal is for somewhere else, and if so, send it there.

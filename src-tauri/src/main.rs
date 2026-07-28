@@ -68,8 +68,8 @@ fn main() {
             let app_name = app_config.app_name.clone();
             let user_agent = app_config.user_agent.clone();
             let window_config = app_config.window.clone();
-            let app_config_navigation = app_config.navigation.clone();
             let path_config_url = window::path_config_url(&app_config);
+            let shell_defaults = app_config.clone();
 
             // Remembered window size, if the user has one. This file is theirs to
             // edit, so it can only carry geometry — never anything from the
@@ -113,54 +113,18 @@ fn main() {
                 )
             };
 
-            // The error page polls this to know where to return to once the
-            // server answers; without it that page falls back to a guess.
-            let server_url_script = format!(
-                "window.__TURBO_DESKTOP_SERVER_URL__ = {};",
-                serde_json::to_string(url.as_str()).expect("URL should serialize")
-            );
 
-            // Send links that belong to someone else to the browser instead of
-            // replacing the app with them. This has to be decided here rather
-            // than in JavaScript: Turbo only intercepts same-origin links, so an
-            // off-origin one never reaches the web layer at all.
-            let navigation_app = app.handle().clone();
-            let navigation_server = server_url.clone();
-            let internal_hosts = app_config_navigation.internal_hosts.clone();
-
-            let new_window_app = navigation_app.clone();
-            let new_window_server = navigation_server.clone();
-            let new_window_hosts = internal_hosts.clone();
-
-            let main_window = WebviewWindowBuilder::new(app, "main", target)
-                .on_navigation(move |url| {
-                    match security::destination_for(&navigation_server, &internal_hosts, url) {
-                        security::LinkDestination::App => true,
-                        security::LinkDestination::SystemBrowser => {
-                            open_externally(&navigation_app, url);
-                            false
-                        }
-                    }
-                })
-                // target="_blank" and window.open take a different path than a
-                // normal navigation, and would otherwise open a bare webview
-                // with none of the app's configuration.
-                .on_new_window(move |url, _features| {
-                    match security::destination_for(&new_window_server, &new_window_hosts, &url) {
-                        security::LinkDestination::App => tauri::webview::NewWindowResponse::Allow,
-                        security::LinkDestination::SystemBrowser => {
-                            open_externally(&new_window_app, &url);
-                            tauri::webview::NewWindowResponse::Deny
-                        }
-                    }
-                })
-                .title(&app_name)
-                .user_agent(&user_agent)
-                .inner_size(window_width, window_height)
-                .min_inner_size(window_config.min_width, window_config.min_height)
-                .resizable(window_config.resizable)
-                .initialization_script(&server_url_script)
-                .build()?;
+            let main_window = window::apply_shell_defaults(
+                WebviewWindowBuilder::new(app, "main", target),
+                &app.handle().clone(),
+                &shell_defaults,
+                "main",
+            )
+            .title(&app_name)
+            .inner_size(window_width, window_height)
+            .min_inner_size(window_config.min_width, window_config.min_height)
+            .resizable(window_config.resizable)
+            .build()?;
 
             // Track the size as it changes. A handler registered on the builder
             // does not apply to windows created here, so it is attached directly.

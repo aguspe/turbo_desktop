@@ -50,6 +50,11 @@ pub struct PathProperties {
     pub title: Option<String>,
     #[serde(default)]
     pub pull_to_refresh_enabled: Option<bool>,
+    /// Size of the window this rule opens, when it opens one.
+    #[serde(default)]
+    pub width: Option<f64>,
+    #[serde(default)]
+    pub height: Option<f64>,
     /// Arbitrary context passed to bridge components
     #[serde(default)]
     pub context: Option<serde_json::Value>,
@@ -141,6 +146,8 @@ impl PathConfigurationStore {
             presentation: Presentation::Default,
             title: None,
             pull_to_refresh_enabled: None,
+            width: None,
+            height: None,
             context: None,
         };
 

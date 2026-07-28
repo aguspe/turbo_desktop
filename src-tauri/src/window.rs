@@ -634,6 +634,58 @@ pub fn path_config_url(config: &TurboDesktopConfig) -> String {
         .unwrap_or_else(|| format!("{}/turbo-desktop/path-configuration.json", config.server_url))
 }
 
+/// Apply the settings every webview in the app should carry.
+///
+/// Modal and secondary windows used to be built bare, so they were missing the
+/// user agent the Rails gem detects on, the external-link handling, and the
+/// globals the injected script reads. Anything opening a webview goes through
+/// here so they cannot drift apart again.
+pub fn apply_shell_defaults<'a, M: tauri::Manager<tauri::Wry>>(
+    builder: tauri::webview::WebviewWindowBuilder<'a, tauri::Wry, M>,
+    app: &tauri::AppHandle,
+    config: &TurboDesktopConfig,
+    label: &str,
+) -> tauri::webview::WebviewWindowBuilder<'a, tauri::Wry, M> {
+    let server_url = config.server_url.clone();
+    let internal_hosts = config.navigation.internal_hosts.clone();
+
+    let navigation_app = app.clone();
+    let navigation_server = server_url.clone();
+    let navigation_hosts = internal_hosts.clone();
+
+    let new_window_app = app.clone();
+
+    // Globals the injected script and the error page read. The label lets a
+    // window ask to be closed without the page having to be told which it is.
+    let globals = format!(
+        "window.__TURBO_DESKTOP_SERVER_URL__ = {};\nwindow.__TURBO_DESKTOP_WINDOW_LABEL__ = {};",
+        serde_json::to_string(&server_url).unwrap_or_else(|_| "null".into()),
+        serde_json::to_string(label).unwrap_or_else(|_| "null".into()),
+    );
+
+    builder
+        .user_agent(&config.user_agent)
+        .initialization_script(&globals)
+        .on_navigation(move |url| {
+            match crate::security::destination_for(&navigation_server, &navigation_hosts, url) {
+                crate::security::LinkDestination::App => true,
+                crate::security::LinkDestination::SystemBrowser => {
+                    crate::open_externally(&navigation_app, url);
+                    false
+                }
+            }
+        })
+        .on_new_window(move |url, _features| {
+            match crate::security::destination_for(&server_url, &internal_hosts, &url) {
+                crate::security::LinkDestination::App => tauri::webview::NewWindowResponse::Allow,
+                crate::security::LinkDestination::SystemBrowser => {
+                    crate::open_externally(&new_window_app, &url);
+                    tauri::webview::NewWindowResponse::Deny
+                }
+            }
+        })
+}
+
 /// Get information about the current window state.
 #[tauri::command]
 pub async fn get_window_info(
