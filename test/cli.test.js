@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   bundleIdentifier,
+  desktopPackage,
   urlScheme,
   defaultBuildTarget,
   defaultUserAgent,
@@ -162,4 +163,34 @@ test("the shell's own config does not leak its identity into scaffolds", () => {
     );
   }
   assert.ok(cli.includes('tauriConf.plugins["deep-link"]'));
+});
+
+test("a scaffolded project gets its own package identity", () => {
+  const shell = JSON.parse(read("package.json"));
+  const scaffold = desktopPackage("Task Manager");
+
+  assert.equal(scaffold.name, "task-manager-desktop");
+  assert.notEqual(scaffold.name, shell.name, "every app would be called turbo-desktop");
+  assert.ok(!scaffold.bin, "a scaffold has no cli/ directory for a bin to point at");
+  assert.equal(scaffold.private, true);
+});
+
+test("a scaffolded project depends on the published shell", () => {
+  const scaffold = desktopPackage("Task Manager");
+
+  assert.equal(scaffold.dependencies["turbo-desktop"], `^${packageVersion()}`);
+  assert.ok(scaffold.devDependencies["@tauri-apps/cli"], "turbo-desktop dev shells out to tauri");
+});
+
+test("the published package carries everything the scaffold copies", () => {
+  const { files } = JSON.parse(read("package.json"));
+
+  // The CLI copies these out of the installed package at scaffold time.
+  for (const needed of ["cli", "src", "src-tauri/src", "src-tauri/capabilities"]) {
+    assert.ok(files.includes(needed), `files must include ${needed}`);
+  }
+  assert.ok(
+    files.some((f) => f.startsWith("src-tauri/Cargo.toml")),
+    "the scaffolded project needs a Cargo.toml"
+  );
 });
