@@ -238,6 +238,36 @@ The Bridge is the desktop equivalent of **Strada**. It lets your web components 
 | `badge` | Set the dock/taskbar badge count |
 | `shortcut` | Register global keyboard shortcuts |
 
+### External links
+
+Links to anywhere other than your app open in the system browser, the same way
+Hotwire Native treats off-origin links. Without that, following a link to a
+payment provider or a terms page replaces your app in its own window and leaves
+the person with no way back. `mailto:`, `tel:` and other non-web schemes go to
+whichever app owns them.
+
+This is decided in the shell rather than in JavaScript, because Turbo only
+intercepts same-origin links — an off-origin one never reaches the web layer at
+all. Ordinary navigations, `target="_blank"`, `window.open` and path
+configuration rules pointing off-origin all go the same way.
+
+Sometimes you need a third-party page *inside* the app: an OAuth round trip has
+to happen in this webview for the session cookie to land in the right place.
+List those hosts:
+
+```json
+{
+  "navigation": {
+    "internal_hosts": ["accounts.google.com"]
+  }
+}
+```
+
+Matching is exact, so `example.com` does not admit `evil-example.com` or
+`sub.example.com`. Being internal is not the same as being trusted: the bridge
+still answers only your app's own origin, so a listed host can render but cannot
+reach the shell.
+
 ### Connection loss and error pages
 
 The shell watches your server and reports failures using the same vocabulary as

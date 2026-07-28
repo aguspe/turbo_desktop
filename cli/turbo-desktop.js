@@ -275,6 +275,11 @@ function cmdInit(args) {
       allowed_commands: [],
       confirm: true,
     },
+    // Off-origin links open in the system browser. List a host here to keep it
+    // in the app window instead — an identity provider, say.
+    navigation: {
+      internal_hosts: [],
+    },
   };
 
   writeFileSync(

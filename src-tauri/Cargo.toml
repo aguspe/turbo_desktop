@@ -23,6 +23,7 @@ url = "2"
 log = "0.4"
 env_logger = "0.11"
 regex-lite = "0.1"
+tauri-plugin-opener = "2.5.4"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 cocoa = "0.26"

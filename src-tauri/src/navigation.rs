@@ -43,6 +43,14 @@ pub async fn handle_visit_proposal(
         properties.presentation
     );
 
+    // Somewhere else entirely — hand it over and tell the web layer to drop it.
+    if handed_to_the_system(&app, &proposal.url) {
+        return Ok(VisitResponse {
+            action: "none".into(),
+            presentation: "external".into(),
+        });
+    }
+
     match properties.presentation {
         Presentation::Default => {
             // Navigate in the current window — let Turbo Drive handle it
@@ -137,6 +145,30 @@ fn same_origin_url(app: &tauri::AppHandle, raw: &str) -> Result<url::Url, String
             "Refused: '{}' is not on the configured app origin",
             raw
         ))
+    }
+}
+
+/// Whether this proposal is for somewhere else, and if so, send it there.
+///
+/// A rule can name any path, including one that points off-origin. Opening a
+/// window on someone else's site and injecting our bridge into it would be
+/// wrong, so those go to the browser like any other external link.
+fn handed_to_the_system(app: &tauri::AppHandle, raw: &str) -> bool {
+    let config = app.state::<crate::window::TurboDesktopConfig>();
+    let Ok(url) = raw.parse::<url::Url>() else {
+        return false;
+    };
+
+    match crate::security::destination_for(
+        &config.server_url,
+        &config.navigation.internal_hosts,
+        &url,
+    ) {
+        crate::security::LinkDestination::App => false,
+        crate::security::LinkDestination::SystemBrowser => {
+            crate::open_externally(app, &url);
+            true
+        }
     }
 }
 
