@@ -605,6 +605,9 @@
       case "focus":
         handleFocusReturn(detail);
         break;
+      case "visit":
+        performVisit(detail.url);
+        break;
       default:
         console.debug("[turbo-desktop] Ignoring unknown message:", kind);
     }
@@ -655,6 +658,22 @@
     }
 
     performNavigation("refresh");
+  }
+
+  /**
+   * Go to a URL the shell asked for — a deep link, usually.
+   *
+   * Through Turbo where it exists, so the visit behaves like any other and the
+   * path configuration still decides how the page is presented.
+   */
+  function performVisit(url) {
+    if (!url) return;
+
+    if (window.Turbo && window.Turbo.visit) {
+      window.Turbo.visit(url);
+    } else {
+      window.location.assign(url);
+    }
   }
 
   /**

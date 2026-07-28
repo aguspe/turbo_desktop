@@ -4,6 +4,7 @@
 mod bridge;
 mod config;
 mod connection;
+mod deep_link;
 mod fs_bridge;
 mod menu;
 mod navigation;
@@ -21,6 +22,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tauri::webview::PageLoadEvent;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_deep_link::DeepLinkExt;
 
 /// How often to check that the app server is still answering.
 const PROBE_INTERVAL: Duration = Duration::from_secs(5);
@@ -29,6 +31,7 @@ fn main() {
     env_logger::init();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
@@ -195,6 +198,12 @@ fn main() {
             // event reports the machine losing its network, not the app server
             // going away, which is the case that actually happens.
             watch_connection(app_handle.clone(), url.clone(), reachable_at_startup);
+
+            // Links from outside the app: your-app://orders/123
+            let deep_link_app = app_handle.clone();
+            app.deep_link().on_open_url(move |event| {
+                deep_link::handle(&deep_link_app, event.urls());
+            });
 
             // Set up the system tray icon
             if let Err(e) = tray::setup_tray(&app_handle) {

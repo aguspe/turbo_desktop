@@ -160,6 +160,7 @@ function cmdInit(args) {
     "bridge.rs",
     "config.rs",
     "connection.rs",
+    "deep_link.rs",
     "fs_bridge.rs",
     "menu.rs",
     "navigation.rs",
@@ -221,10 +222,23 @@ function cmdInit(args) {
     join(desktopDir, "src-tauri", "build.rs")
   );
 
-  // Copy tauri.conf.json
-  copyFileSync(
-    join(PACKAGE_ROOT, "src-tauri", "tauri.conf.json"),
-    join(desktopDir, "src-tauri", "tauri.conf.json")
+  // Write tauri.conf.json with this app's own identity. Copying it verbatim
+  // would give every app built with the shell the same bundle identifier, so
+  // they would share a preferences directory, and the same URL scheme, so
+  // whichever was installed last would answer the others' deep links.
+  const appName = guessAppName(projectDir);
+  const tauriConf = JSON.parse(
+    readFileSync(join(PACKAGE_ROOT, "src-tauri", "tauri.conf.json"), "utf-8")
+  );
+
+  tauriConf.productName = appName;
+  tauriConf.identifier = bundleIdentifier(appName);
+  tauriConf.plugins = tauriConf.plugins || {};
+  tauriConf.plugins["deep-link"] = { desktop: { schemes: [urlScheme(appName)] } };
+
+  writeFileSync(
+    join(desktopDir, "src-tauri", "tauri.conf.json"),
+    JSON.stringify(tauriConf, null, 2) + "\n"
   );
 
   // Copy JS bridge and supporting files
@@ -477,6 +491,38 @@ export function defaultBuildTarget() {
   if (platform === "win32") return `${arch}-pc-windows-msvc`;
   if (platform === "linux") return `${arch}-unknown-linux-gnu`;
   return `${arch}-apple-darwin`; // fallback
+}
+
+// Lowercase, hyphenated, starting with a letter — the shape a URL scheme and a
+// bundle identifier segment both have to take.
+function slugify(name) {
+  const slug = String(name)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return /^[a-z]/.test(slug) ? slug : `app-${slug}`;
+}
+
+/**
+ * The URL scheme this app answers deep links on, e.g. "task-manager", giving
+ * task-manager://orders/123.
+ *
+ * Per app rather than shared: no desktop OS arbitrates duplicate scheme
+ * registrations in a way you control, so two apps claiming one scheme means
+ * links silently open the wrong one. Pick something distinctive — nothing stops
+ * other software registering the same string.
+ */
+export function urlScheme(appName) {
+  return slugify(appName);
+}
+
+/**
+ * Reverse-DNS bundle identifier. macOS keys the app's data directory off this,
+ * so two apps sharing one would share their stored preferences.
+ */
+export function bundleIdentifier(appName) {
+  return `com.${slugify(appName)}.app`;
 }
 
 export function guessAppName(projectDir) {
