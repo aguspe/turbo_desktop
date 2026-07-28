@@ -586,3 +586,102 @@ describe("Connection and visit errors", () => {
     assert.strictEqual(window.document.querySelector(BANNER), null);
   });
 });
+
+describe("Modal dismissal", () => {
+  it("knows the window it is in", () => {
+    const { window } = createEnvironment();
+    window.__TURBO_DESKTOP_WINDOW_LABEL__ = "modal-abc123";
+
+    assert.strictEqual(window.TurboDesktop.windowLabel, "modal-abc123");
+    assert.strictEqual(window.TurboDesktop.isModal, true);
+  });
+
+  it("does not think the main window is a modal", () => {
+    const { window } = createEnvironment();
+    window.__TURBO_DESKTOP_WINDOW_LABEL__ = "main";
+
+    assert.strictEqual(window.TurboDesktop.isModal, false);
+  });
+
+  it("closes the window it is in when given no label", async () => {
+    const { window, calls } = createEnvironment({ invoke: async () => {} });
+    window.__TURBO_DESKTOP_WINDOW_LABEL__ = "modal-abc123";
+    await tick();
+
+    await window.TurboDesktop.closeModal();
+
+    const call = calls.find((c) => c.cmd === "close_modal");
+    assert.ok(call, "expected a close_modal call");
+    assert.strictEqual(call.args.label, "modal-abc123");
+  });
+
+  it("uses Hotwire Native's dismissal names", async () => {
+    for (const [method, then] of [
+      ["recede", "recede"],
+      ["refresh", "refresh"],
+      ["resume", "resume"],
+    ]) {
+      const { window, calls } = createEnvironment({ invoke: async () => {} });
+      await tick();
+
+      await window.TurboDesktop[method]();
+
+      const call = calls.find((c) => c.cmd === "dismiss_modal");
+      assert.ok(call, `expected ${method}() to dismiss`);
+      assert.strictEqual(call.args.then, then);
+    }
+  });
+});
+
+describe("Messages from the shell", () => {
+  it("refreshes the page when told to", () => {
+    const { window } = createEnvironment();
+    const visits = [];
+    window.Turbo = { visit: (url, opts) => visits.push({ url, opts }) };
+
+    window.TurboDesktop.__receive("navigate", { action: "refresh" });
+
+    assert.strictEqual(visits.length, 1);
+    assert.strictEqual(visits[0].opts.action, "replace");
+  });
+
+  it("leaves the page alone when told to resume", () => {
+    const { window } = createEnvironment();
+    const visits = [];
+    window.Turbo = { visit: (url, opts) => visits.push({ url, opts }) };
+
+    window.TurboDesktop.__receive("navigate", { action: "none" });
+
+    assert.deepStrictEqual(visits, []);
+  });
+
+  it("shows the banner when the shell reports a lost connection", () => {
+    const { window } = createEnvironment();
+
+    window.TurboDesktop.__receive("connection", {
+      online: false,
+      error: "network_failure",
+    });
+
+    assert.ok(window.document.querySelector("#turbo-desktop-offline-overlay"));
+  });
+
+  it("clears the banner when the shell reports reconnection", () => {
+    const { window } = createEnvironment();
+
+    window.TurboDesktop.__receive("connection", { online: false });
+    window.TurboDesktop.__receive("connection", { online: true });
+
+    assert.strictEqual(
+      window.document.querySelector("#turbo-desktop-offline-overlay"),
+      null
+    );
+  });
+
+  it("ignores messages it does not understand", () => {
+    const { window } = createEnvironment();
+
+    // Must not throw — the shell may be newer than the injected script.
+    window.TurboDesktop.__receive("something-new", { a: 1 });
+  });
+});

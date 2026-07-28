@@ -122,6 +122,37 @@
     },
 
     /**
+     * Close this modal and go back on the screen underneath, as if it had
+     * never been opened. Named after Hotwire Native's dismissal semantics.
+     */
+    async recede() {
+      return TurboDesktop.dismiss("recede");
+    },
+
+    /**
+     * Close this modal and reload the screen underneath — what you usually
+     * want after a form submits.
+     */
+    async refresh() {
+      return TurboDesktop.dismiss("refresh");
+    },
+
+    /** Close this modal and leave the screen underneath as it was. */
+    async resume() {
+      return TurboDesktop.dismiss("resume");
+    },
+
+    async dismiss(then = "resume", label = undefined) {
+      if (!INVOKE) return;
+
+      try {
+        await INVOKE("dismiss_modal", { label: label || null, then });
+      } catch (e) {
+        console.error("[turbo-desktop] Dismiss failed:", e);
+      }
+    },
+
+    /**
      * Toggle developer tools (dispatches to Rust which can open the inspector).
      */
     toggleDevTools() {
@@ -554,18 +585,48 @@
    * network, which is not the case that usually happens — the server going down
    * while the network is fine looks entirely healthy from in here.
    */
-  if (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.event) {
-    // Tauri's listen() is promise-based and may not exist in older shells.
-    try {
-      const listen = window.__TAURI__ && window.__TAURI__.event && window.__TAURI__.event.listen;
-      if (listen) {
-        listen("turbo-desktop:connection", (event) => {
-          const payload = event.payload || {};
-          reportConnection(Boolean(payload.online), payload.error || null);
-        });
-      }
-    } catch (e) {
-      console.debug("[turbo-desktop] Connection events unavailable:", e);
+  /**
+   * Entry point the shell calls into. Not part of the public API.
+   *
+   * The shell reaches the page this way rather than through Tauri's event API,
+   * which would need the whole JS API exposed on window for any loaded page to
+   * reach.
+   */
+  TurboDesktop.__receive = function (kind, payload) {
+    const detail = payload || {};
+
+    switch (kind) {
+      case "connection":
+        reportConnection(Boolean(detail.online), detail.error || null);
+        break;
+      case "navigate":
+        performNavigation(detail.action);
+        break;
+      default:
+        console.debug("[turbo-desktop] Ignoring unknown message:", kind);
+    }
+  };
+
+  /**
+   * Act on what the shell asked the page underneath to do after a modal closed.
+   */
+  function performNavigation(action) {
+    switch (action) {
+      case "back":
+        window.history.back();
+        break;
+      case "refresh":
+        // Turbo's own refresh keeps scroll position and morphs where it can.
+        if (window.Turbo && window.Turbo.visit) {
+          window.Turbo.visit(window.location.href, { action: "replace" });
+        } else {
+          window.location.reload();
+        }
+        break;
+      case "none":
+        break;
+      default:
+        console.debug("[turbo-desktop] Ignoring unknown navigation:", action);
     }
   }
 

@@ -45,6 +45,7 @@ const APP_COMMANDS: &[&str] = &[
     "page_loaded",
     "page_loading",
     "close_modal",
+    "dismiss_modal",
     "handle_bridge_message",
     "send_bridge_response",
     "retry_connection",

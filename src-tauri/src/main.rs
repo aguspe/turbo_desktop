@@ -20,13 +20,10 @@ use connection::{ConnectionMonitor, Transition, VisitError};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::webview::PageLoadEvent;
-use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 /// How often to check that the app server is still answering.
 const PROBE_INTERVAL: Duration = Duration::from_secs(5);
-
-/// Event the web layer listens on for connection changes.
-const CONNECTION_EVENT: &str = "turbo-desktop:connection";
 
 fn main() {
     env_logger::init();
@@ -181,6 +178,7 @@ fn main() {
             navigation::page_loaded,
             navigation::page_loading,
             navigation::close_modal,
+            navigation::dismiss_modal,
             bridge::handle_bridge_message,
             bridge::send_bridge_response,
             connection::retry_connection,
@@ -253,9 +251,7 @@ fn watch_connection(app: tauri::AppHandle, url: url::Url, reachable_at_startup: 
                 Transition::Unchanged => continue,
             };
 
-            if let Err(e) = app.emit(CONNECTION_EVENT, payload) {
-                log::warn!("Could not report the connection change: {}", e);
-            }
+            window::deliver_to_all(&app, "connection", &payload);
         }
     });
 }

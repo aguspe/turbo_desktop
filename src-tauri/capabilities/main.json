@@ -11,6 +11,7 @@
     "allow-page-loaded",
     "allow-page-loading",
     "allow-close-modal",
+    "allow-dismiss-modal",
     "allow-handle-bridge-message",
     "allow-send-bridge-response",
     "allow-retry-connection",
