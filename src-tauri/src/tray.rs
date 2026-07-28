@@ -45,10 +45,12 @@ fn handle_tray_menu_event<R: Runtime>(app: &tauri::AppHandle<R>, event_id: &str)
             }
         }
         "tray-quit" => {
-            std::process::exit(0);
+            // Not std::process::exit: that skips Tauri's shutdown, leaving child
+            // processes running and window preferences unwritten.
+            app.exit(0);
         }
-        _ => {
-            log::debug!("Unhandled tray event: {}", event_id);
-        }
+        // The menu bar has its own handler; tray events for anything else are not
+        // ours to act on.
+        other => log::debug!("Unhandled tray event: {}", other),
     }
 }
