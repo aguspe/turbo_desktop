@@ -305,7 +305,7 @@ Next steps:
 `);
 }
 
-function cmdDev(args) {
+function cmdDev() {
   console.log("Starting Turbo Desktop in development mode...");
 
   // Check if we're in a desktop/ directory or the project root
