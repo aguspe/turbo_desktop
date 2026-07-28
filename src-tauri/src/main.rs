@@ -45,25 +45,11 @@ fn server_is_reachable(url: &url::Url) -> bool {
 fn main() {
     env_logger::init();
 
-    // Load the app configuration (server URL, window size, etc.)
-    let app_config = window::load_config(None).expect("Failed to load turbo-desktop config");
-    let server_url = app_config.server_url.clone();
-    let app_name = app_config.app_name.clone();
-    let user_agent = app_config.user_agent.clone();
-    let window_config = app_config.window.clone();
-    let path_config_url = window::path_config_url(&app_config);
-
-    // Create the path config store as Arc so we can share it with the async fetch task.
-    let config_store = Arc::new(PathConfigurationStore::new());
-    let config_store_for_fetch = config_store.clone();
-
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .manage(config_store)
-        .manage(app_config)
         .manage(process_manager::ProcessManager::new())
         // Inject turbo-desktop.js into every page load across all webviews.
         .on_page_load(|webview, payload| {
@@ -75,6 +61,33 @@ fn main() {
             }
         })
         .setup(move |app| {
+            // Loaded here rather than in main() because a packaged app reads it
+            // from the bundle's resource directory, which needs the app handle.
+            let loaded = window::ConfigLookup::for_app(app)
+                .load()
+                .map_err(Box::<dyn std::error::Error>::from)?;
+
+            match &loaded.source {
+                Some(path) => log::info!("Configuration loaded from {}", path.display()),
+                None => log::warn!(
+                    "No {} found — starting with development defaults",
+                    window::CONFIG_FILENAME
+                ),
+            }
+
+            let app_config = loaded.config;
+            let server_url = app_config.server_url.clone();
+            let app_name = app_config.app_name.clone();
+            let user_agent = app_config.user_agent.clone();
+            let window_config = app_config.window.clone();
+            let path_config_url = window::path_config_url(&app_config);
+
+            // Shared as an Arc so the background fetch task can hold on to it.
+            let config_store = Arc::new(PathConfigurationStore::new());
+            let config_store_for_fetch = config_store.clone();
+            app.manage(config_store);
+            app.manage(app_config);
+
             let app_handle = app.handle().clone();
 
             // Build and set the native menu bar
