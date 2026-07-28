@@ -1,5 +1,5 @@
 /**
- * @turbo-desktop/bridge
+ * turbo-desktop-bridge
  *
  * Typed ESM exports for the Turbo Desktop JavaScript bridge.
  *
@@ -8,7 +8,7 @@
  * imports that reference the same globals — no bundling required.
  *
  * Usage:
- *   import { TurboDesktop, BridgeComponent, stimulusBridge } from "@turbo-desktop/bridge"
+ *   import { TurboDesktop, BridgeComponent, stimulusBridge } from "turbo-desktop-bridge"
  */
 
 /** The main Turbo Desktop API. */

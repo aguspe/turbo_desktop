@@ -1,17 +1,17 @@
-# @turbo-desktop/bridge
+# turbo-desktop-bridge
 
 Typed ESM imports for the [Turbo Desktop](https://github.com/aguspe/turbo_desktop) JavaScript bridge API.
 
 ## Installation
 
 ```bash
-npm install @turbo-desktop/bridge
+npm install turbo-desktop-bridge
 ```
 
 ## Usage
 
 ```javascript
-import { TurboDesktop, BridgeComponent, stimulusBridge, isTurboDesktop } from "@turbo-desktop/bridge"
+import { TurboDesktop, BridgeComponent, stimulusBridge, isTurboDesktop } from "turbo-desktop-bridge"
 
 // Check if running inside a Turbo Desktop shell
 if (isTurboDesktop()) {
@@ -24,7 +24,7 @@ if (isTurboDesktop()) {
 
 ```javascript
 import { Controller } from "@hotwired/stimulus"
-import { stimulusBridge } from "@turbo-desktop/bridge"
+import { stimulusBridge } from "turbo-desktop-bridge"
 
 export default class extends stimulusBridge(Controller, "notification") {
   connect() {
