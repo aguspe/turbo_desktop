@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use tauri::{Emitter, Manager};
+use tauri::Emitter;
 
 /// Bridge message sent from JavaScript to the native shell.
 ///
@@ -35,31 +35,7 @@ pub struct BridgeResponse {
     pub data: serde_json::Value,
 }
 
-/// Reject calls from any page that is not the configured app origin.
-///
-/// Tauri's ACL only covers plugin commands, so app-defined commands like this one
-/// are reachable from whatever the webview happens to have loaded. Since the
-/// bridge fans out to shell, filesystem and sudo, the origin check is the gate.
-fn ensure_trusted_caller(
-    app: &tauri::AppHandle,
-    webview: &tauri::Webview,
-) -> Result<(), String> {
-    let config = app.state::<crate::window::TurboDesktopConfig>();
-    let url = webview
-        .url()
-        .map_err(|e| format!("Could not determine the calling page: {}", e))?;
-
-    if crate::security::is_trusted_origin(&config.server_url, &url) {
-        return Ok(());
-    }
-
-    log::warn!(
-        "Bridge: refused a message from untrusted origin '{}' (expected '{}')",
-        url.origin().ascii_serialization(),
-        config.server_url
-    );
-    Err("Refused: the bridge is only available to the configured app origin".to_string())
-}
+use crate::security::ensure_trusted_caller;
 
 /// Handle an incoming bridge message from a web component.
 #[tauri::command]

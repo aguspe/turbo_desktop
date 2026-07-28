@@ -42,6 +42,33 @@ pub fn is_trusted_origin(server_url: &str, candidate: &Url) -> bool {
         && candidate.port_or_known_default() == server.port_or_known_default()
 }
 
+/// Reject a command call coming from any page that is not the app origin.
+///
+/// Tauri's ACL only covers plugin commands, so every app-defined command that
+/// can act on the host has to ask for this itself.
+pub fn ensure_trusted_caller(
+    app: &tauri::AppHandle,
+    webview: &tauri::Webview,
+) -> Result<(), String> {
+    use tauri::Manager;
+
+    let config = app.state::<crate::window::TurboDesktopConfig>();
+    let url = webview
+        .url()
+        .map_err(|e| format!("Could not determine the calling page: {}", e))?;
+
+    if is_trusted_origin(&config.server_url, &url) {
+        return Ok(());
+    }
+
+    log::warn!(
+        "Refused a call from untrusted origin '{}' (expected '{}')",
+        url.origin().ascii_serialization(),
+        config.server_url
+    );
+    Err("Refused: this command is only available to the configured app origin".to_string())
+}
+
 /// Home directory, honouring the Windows variable as well as `HOME`.
 fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME")

@@ -153,7 +153,13 @@ pub fn path_config_url(config: &TurboDesktopConfig) -> String {
 
 /// Get information about the current window state.
 #[tauri::command]
-pub async fn get_window_info(window: tauri::Window) -> Result<serde_json::Value, String> {
+pub async fn get_window_info(
+    app: tauri::AppHandle,
+    webview: tauri::Webview,
+    window: tauri::Window,
+) -> Result<serde_json::Value, String> {
+    crate::security::ensure_trusted_caller(&app, &webview)?;
+
     let size = window.inner_size().map_err(|e| format!("{}", e))?;
     let position = window.outer_position().map_err(|e| format!("{}", e))?;
     let scale = window.scale_factor().map_err(|e| format!("{}", e))?;

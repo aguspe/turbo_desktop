@@ -76,21 +76,66 @@ fn default_presentation() -> Presentation {
     Presentation::Default
 }
 
+/// A rule with its patterns already compiled.
+struct CompiledRule {
+    patterns: Vec<regex_lite::Regex>,
+    properties: PathProperties,
+}
+
+/// Compile every pattern once, reporting the ones that do not parse.
+///
+/// An unparseable pattern used to be skipped silently on every navigation,
+/// which made a typo in the path configuration look like a routing bug.
+fn compile(config: &PathConfiguration) -> Vec<CompiledRule> {
+    config
+        .rules
+        .iter()
+        .map(|rule| {
+            let patterns = rule
+                .patterns
+                .iter()
+                .filter_map(|pattern| match regex_lite::Regex::new(pattern) {
+                    Ok(re) => Some(re),
+                    Err(e) => {
+                        log::warn!(
+                            "Path configuration: ignoring invalid pattern '{}': {}",
+                            pattern,
+                            e
+                        );
+                        None
+                    }
+                })
+                .collect();
+
+            CompiledRule {
+                patterns,
+                properties: rule.properties.clone(),
+            }
+        })
+        .collect()
+}
+
 /// Thread-safe container for the active path configuration.
+///
+/// Holds the parsed configuration alongside its compiled patterns so that
+/// matching a path does not recompile every regex.
 pub struct PathConfigurationStore {
     config: RwLock<Option<PathConfiguration>>,
+    compiled: RwLock<Vec<CompiledRule>>,
 }
 
 impl PathConfigurationStore {
     pub fn new() -> Self {
         Self {
             config: RwLock::new(None),
+            compiled: RwLock::new(Vec::new()),
         }
     }
 
     pub fn set(&self, config: PathConfiguration) {
-        let mut store = self.config.write().unwrap();
-        *store = Some(config);
+        let compiled = compile(&config);
+        *self.compiled.write().unwrap() = compiled;
+        *self.config.write().unwrap() = Some(config);
     }
 
     pub fn get(&self) -> Option<PathConfiguration> {
@@ -101,7 +146,6 @@ impl PathConfigurationStore {
     /// Find the matching rule for a given URL path.
     /// Rules are evaluated in order; the LAST match wins (same as Hotwire Native).
     pub fn properties_for_path(&self, path: &str) -> PathProperties {
-        let store = self.config.read().unwrap();
         let mut result = PathProperties {
             presentation: Presentation::Default,
             title: None,
@@ -109,15 +153,9 @@ impl PathConfigurationStore {
             context: None,
         };
 
-        if let Some(config) = store.as_ref() {
-            for rule in &config.rules {
-                for pattern in &rule.patterns {
-                    if let Ok(re) = regex_lite::Regex::new(pattern) {
-                        if re.is_match(path) {
-                            result = rule.properties.clone();
-                        }
-                    }
-                }
+        for rule in self.compiled.read().unwrap().iter() {
+            if rule.patterns.iter().any(|re| re.is_match(path)) {
+                result = rule.properties.clone();
             }
         }
 
@@ -137,6 +175,98 @@ pub async fn fetch_path_configuration(url: &str) -> Result<PathConfiguration, St
         .map_err(|e| format!("Failed to parse path configuration: {}", e))?;
 
     Ok(config)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn store_with(json: &str) -> PathConfigurationStore {
+        let config: PathConfiguration =
+            serde_json::from_str(json).expect("test configuration should parse");
+        let store = PathConfigurationStore::new();
+        store.set(config);
+        store
+    }
+
+    #[test]
+    fn defaults_when_nothing_is_configured() {
+        let store = PathConfigurationStore::new();
+        assert_eq!(
+            store.properties_for_path("/anything").presentation,
+            Presentation::Default
+        );
+    }
+
+    #[test]
+    fn matches_a_rule_by_pattern() {
+        let store = store_with(
+            r#"{"rules":[{"patterns":["/new$"],"properties":{"presentation":"modal"}}]}"#,
+        );
+
+        assert_eq!(
+            store.properties_for_path("/posts/new").presentation,
+            Presentation::Modal
+        );
+        assert_eq!(
+            store.properties_for_path("/posts").presentation,
+            Presentation::Default
+        );
+    }
+
+    #[test]
+    fn the_last_matching_rule_wins() {
+        let store = store_with(
+            r#"{"rules":[
+                {"patterns":["/settings"],"properties":{"presentation":"modal"}},
+                {"patterns":["/settings"],"properties":{"presentation":"native"}}
+            ]}"#,
+        );
+
+        assert_eq!(
+            store.properties_for_path("/settings").presentation,
+            Presentation::Native
+        );
+    }
+
+    #[test]
+    fn an_invalid_pattern_does_not_disable_the_rest_of_the_rule() {
+        let store = store_with(
+            r#"{"rules":[{"patterns":["[unclosed","/new$"],"properties":{"presentation":"modal"}}]}"#,
+        );
+
+        assert_eq!(
+            store.properties_for_path("/posts/new").presentation,
+            Presentation::Modal
+        );
+    }
+
+    #[test]
+    fn replacing_the_configuration_replaces_the_compiled_patterns() {
+        let store = store_with(
+            r#"{"rules":[{"patterns":["/new$"],"properties":{"presentation":"modal"}}]}"#,
+        );
+        assert_eq!(
+            store.properties_for_path("/posts/new").presentation,
+            Presentation::Modal
+        );
+
+        store.set(
+            serde_json::from_str(
+                r#"{"rules":[{"patterns":["/edit$"],"properties":{"presentation":"native"}}]}"#,
+            )
+            .unwrap(),
+        );
+
+        assert_eq!(
+            store.properties_for_path("/posts/new").presentation,
+            Presentation::Default
+        );
+        assert_eq!(
+            store.properties_for_path("/posts/edit").presentation,
+            Presentation::Native
+        );
+    }
 }
 
 /// Load path configuration from a local JSON file.
