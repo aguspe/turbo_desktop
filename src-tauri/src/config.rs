@@ -155,8 +155,21 @@ impl PathConfigurationStore {
 }
 
 /// Load path configuration from a remote URL (your Rails server).
-pub async fn fetch_path_configuration(url: &str) -> Result<PathConfiguration, String> {
-    let response = reqwest::get(url)
+///
+/// Sends the app's user agent so this request is recognisable to the server as
+/// coming from the desktop shell, the same as the requests the webview makes.
+pub async fn fetch_path_configuration(
+    url: &str,
+    user_agent: &str,
+) -> Result<PathConfiguration, String> {
+    let client = reqwest::Client::builder()
+        .user_agent(user_agent)
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let response = client
+        .get(url)
+        .send()
         .await
         .map_err(|e| format!("Failed to fetch path configuration: {}", e))?;
 

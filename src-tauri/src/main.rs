@@ -15,9 +15,32 @@ mod updater_bridge;
 mod window;
 
 use config::PathConfigurationStore;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::Arc;
+use std::time::Duration;
 use tauri::webview::PageLoadEvent;
-use tauri::Manager;
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+
+/// How long to wait when checking whether the app server is up.
+const REACHABILITY_TIMEOUT: Duration = Duration::from_millis(500);
+
+/// Can we open a TCP connection to the app server?
+///
+/// Decides whether the window opens on the app or on the bundled "waiting for
+/// your server" page. A plain connect keeps startup predictable — no HTTP
+/// client, no async runtime, and a bounded wait.
+fn server_is_reachable(url: &url::Url) -> bool {
+    let (Some(host), Some(port)) = (url.host_str(), url.port_or_known_default()) else {
+        return false;
+    };
+
+    match (host, port).to_socket_addrs() {
+        Ok(addrs) => addrs
+            .into_iter()
+            .any(|addr| TcpStream::connect_timeout(&addr, REACHABILITY_TIMEOUT).is_ok()),
+        Err(_) => false,
+    }
+}
 
 fn main() {
     env_logger::init();
@@ -26,6 +49,8 @@ fn main() {
     let app_config = window::load_config(None).expect("Failed to load turbo-desktop config");
     let server_url = app_config.server_url.clone();
     let app_name = app_config.app_name.clone();
+    let user_agent = app_config.user_agent.clone();
+    let window_config = app_config.window.clone();
     let path_config_url = window::path_config_url(&app_config);
 
     // Create the path config store as Arc so we can share it with the async fetch task.
@@ -62,27 +87,45 @@ fn main() {
                 menu::handle_menu_event(&menu_handle, event.id().as_ref());
             });
 
-            // Get the main window created by tauri.conf.json
-            let main_window = app
-                .get_webview_window("main")
-                .expect("main window not found");
-
-            // Set the window title to the app name
-            main_window.set_title(&app_name).ok();
-
-            // Navigate to the Rails server URL. The URL is JSON-encoded rather than
-            // quoted by hand so a quote in it cannot break out into script.
+            // Build the main window here rather than in tauri.conf.json, so it can
+            // carry the runtime configuration: the user agent the Rails gem detects
+            // on, and the window geometry from turbo-desktop.config.json. Opening
+            // straight at the app URL also avoids loading a local page and then
+            // scripting a redirect away from it.
             let url: url::Url = server_url.parse().expect("Invalid server URL");
-            let encoded = serde_json::to_string(url.as_str()).expect("URL should serialize");
-            main_window
-                .eval(&format!("window.location.replace({})", encoded))
-                .ok();
+
+            let target = if server_is_reachable(&url) {
+                WebviewUrl::External(url.clone())
+            } else {
+                log::warn!(
+                    "Could not reach {} — opening the bundled waiting page instead",
+                    url
+                );
+                WebviewUrl::App("index.html".into())
+            };
+
+            // The waiting page polls this to know where to redirect once the
+            // server answers; without it that page falls back to a guess.
+            let server_url_script = format!(
+                "window.__TURBO_DESKTOP_SERVER_URL__ = {};",
+                serde_json::to_string(url.as_str()).expect("URL should serialize")
+            );
+
+            WebviewWindowBuilder::new(app, "main", target)
+                .title(&app_name)
+                .user_agent(&user_agent)
+                .inner_size(window_config.width, window_config.height)
+                .min_inner_size(window_config.min_width, window_config.min_height)
+                .resizable(window_config.resizable)
+                .initialization_script(&server_url_script)
+                .build()?;
 
             // Fetch path configuration from the server in the background
             let pc_url = path_config_url.clone();
+            let pc_user_agent = user_agent.clone();
             let store = config_store_for_fetch.clone();
             tauri::async_runtime::spawn(async move {
-                match config::fetch_path_configuration(&pc_url).await {
+                match config::fetch_path_configuration(&pc_url, &pc_user_agent).await {
                     Ok(pc) => {
                         log::info!("Path configuration loaded: {} rules", pc.rules.len());
                         store.set(pc);
