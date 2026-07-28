@@ -124,6 +124,26 @@ This file carries the app's trust boundary, so where it is read from matters:
 
 A config that exists but does not parse is always fatal, in both cases.
 
+#### User preferences
+
+The window size the user leaves the app at is remembered separately, in their own
+config directory (`~/Library/Application Support/<bundle id>/preferences.json` on
+macOS), and reapplied on the next launch:
+
+```json
+{ "window": { "width": 1440, "height": 900 } }
+```
+
+That file is the only user-writable input the app reads, and it can hold nothing
+but geometry. Adding a `sudo` or `server_url` key to it has no effect — the type
+it deserializes into has nowhere to put them. Sizes that would produce an
+unusable window (below the configured minimum, negative, not a number) fall back
+to the configured defaults, and a corrupt file is ignored rather than fatal,
+since losing a remembered window size should not stop the app from starting.
+
+Only size is remembered, not position: a remembered position becomes an
+off-screen window as soon as the display arrangement changes.
+
 The reason for the split is that a writable config is a way around every other
 protection here: `server_url` decides which origin the bridge trusts, and the
 filesystem roots and sudo allowlist sit in the same file. Reading it from the

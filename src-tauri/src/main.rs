@@ -51,6 +51,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(process_manager::ProcessManager::new())
+        .manage(window::LastWindowSize::default())
         // Inject turbo-desktop.js into every page load across all webviews.
         .on_page_load(|webview, payload| {
             if let PageLoadEvent::Finished = payload.event() {
@@ -81,6 +82,13 @@ fn main() {
             let user_agent = app_config.user_agent.clone();
             let window_config = app_config.window.clone();
             let path_config_url = window::path_config_url(&app_config);
+
+            // Remembered window size, if the user has one. This file is theirs to
+            // edit, so it can only carry geometry — never anything from the
+            // security policy, which comes from the config above.
+            let preferences = window::load_preferences(app.path().app_config_dir().ok().as_deref());
+            let (window_width, window_height) = preferences.window_size(&window_config);
+            log::debug!("Opening window at {}x{}", window_width, window_height);
 
             // Shared as an Arc so the background fetch task can hold on to it.
             let config_store = Arc::new(PathConfigurationStore::new());
@@ -124,14 +132,32 @@ fn main() {
                 serde_json::to_string(url.as_str()).expect("URL should serialize")
             );
 
-            WebviewWindowBuilder::new(app, "main", target)
+            let main_window = WebviewWindowBuilder::new(app, "main", target)
                 .title(&app_name)
                 .user_agent(&user_agent)
-                .inner_size(window_config.width, window_config.height)
+                .inner_size(window_width, window_height)
                 .min_inner_size(window_config.min_width, window_config.min_height)
                 .resizable(window_config.resizable)
                 .initialization_script(&server_url_script)
                 .build()?;
+
+            // Track the size as it changes. A handler registered on the builder
+            // does not apply to windows created here, so it is attached directly.
+            // This is a fallback for exits that reach us after the window is gone;
+            // normally the size is read from the window itself on the way out.
+            let size_handle = app.handle().clone();
+            main_window.on_window_event(move |event| {
+                if let tauri::WindowEvent::Resized(size) = event {
+                    if let Some(window) = size_handle.get_webview_window("main") {
+                        if let Ok(scale) = window.scale_factor() {
+                            size_handle.state::<window::LastWindowSize>().set(
+                                f64::from(size.width) / scale,
+                                f64::from(size.height) / scale,
+                            );
+                        }
+                    }
+                }
+            });
 
             // Fetch path configuration from the server in the background
             let pc_url = path_config_url.clone();
@@ -171,9 +197,54 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("Error building Turbo Desktop")
         .run(|app_handle, event| {
-            if let tauri::RunEvent::ExitRequested { .. } = event {
+            // Both, because which one arrives depends on how the app was closed:
+            // the last window closing raises ExitRequested, while the Quit menu
+            // item terminates through Cocoa and only reaches Exit.
+            if matches!(
+                event,
+                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
+            ) {
+                log::debug!("Shutting down; saving window size");
+                remember_window_size(app_handle);
+
                 let pm = app_handle.state::<process_manager::ProcessManager>();
                 tauri::async_runtime::block_on(pm.kill_all());
             }
         });
+}
+
+/// Write the last known window size so the next launch reopens at it.
+///
+/// Best-effort: failing to write preferences is not worth interrupting a quit,
+/// so problems are logged and dropped. Called from every plausible exit point,
+/// and writing the same size twice is harmless.
+fn remember_window_size(app: &tauri::AppHandle) {
+    // Measure the window if it is still there, otherwise use the last size we saw.
+    // outer_size, not inner_size: the whole window is what the builder reproduces
+    // on the next launch, so it is what has to be measured. The window manager may
+    // also have shrunk the window to fit the screen's usable area, and recording
+    // the result of that settles on a stable size instead of losing the title bar
+    // height again on every launch.
+    let current = app
+        .get_webview_window("main")
+        .and_then(|window| Some((window.outer_size().ok()?, window.scale_factor().ok()?)))
+        .map(|(size, scale)| (f64::from(size.width) / scale, f64::from(size.height) / scale));
+
+    let Some((width, height)) = current.or_else(|| app.state::<window::LastWindowSize>().get())
+    else {
+        log::debug!("No window size available; nothing to save");
+        return;
+    };
+    let Ok(dir) = app.path().app_config_dir() else {
+        log::warn!("No config directory available; window size not saved");
+        return;
+    };
+
+    let preferences = window::Preferences {
+        window: Some(window::WindowPreferences { width, height }),
+    };
+
+    if let Err(e) = window::save_preferences(&dir, &preferences) {
+        log::warn!("Could not save window preferences: {}", e);
+    }
 }

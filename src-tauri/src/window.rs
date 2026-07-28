@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Desktop app configuration loaded from turbo-desktop.config.json.
 /// This file lives in the Rails project root (or wherever the user runs `turbo-desktop init`).
@@ -240,10 +240,118 @@ impl ConfigLookup {
     }
 }
 
+/// Name of the user-writable preferences file.
+pub const PREFERENCES_FILENAME: &str = "preferences.json";
+
+/// Settings the person using the app may change, stored in their own config
+/// directory.
+///
+/// Deliberately separate from [`TurboDesktopConfig`] rather than a partial copy
+/// of it. This file sits in a directory any process running as the user can
+/// write, so the type is kept unable to express anything but window geometry —
+/// there is no field here that could widen the sudo allowlist, add a filesystem
+/// root, or move `server_url` and with it the origin the bridge trusts. Unknown
+/// keys are ignored, so adding a `"sudo"` block to this file does nothing.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct Preferences {
+    #[serde(default)]
+    pub window: Option<WindowPreferences>,
+}
+
+/// Remembered window geometry.
+///
+/// Size only, not position: a remembered position becomes an off-screen window
+/// as soon as the display arrangement changes.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WindowPreferences {
+    pub width: f64,
+    pub height: f64,
+}
+
+/// Fall back to `fallback` for anything that is not a usable dimension.
+///
+/// The file is hand-editable, so it can hold a negative number, a NaN, or a
+/// value below the app's minimum — none of which should produce a window the
+/// user cannot recover.
+fn usable_dimension(value: f64, min: f64, fallback: f64) -> f64 {
+    if value.is_finite() && value >= min {
+        value
+    } else {
+        fallback
+    }
+}
+
+impl Preferences {
+    /// Window size to open with, given the app's configured defaults.
+    pub fn window_size(&self, config: &WindowConfig) -> (f64, f64) {
+        match &self.window {
+            Some(window) => (
+                usable_dimension(window.width, config.min_width, config.width),
+                usable_dimension(window.height, config.min_height, config.height),
+            ),
+            None => (config.width, config.height),
+        }
+    }
+}
+
+/// The main window's most recent size, in logical units.
+///
+/// Kept in memory and updated as the window resizes, because the size has to be
+/// written at a point where the window itself may already be gone: the macOS
+/// Quit item goes straight to Cocoa's `terminate:`, so the app can be on its way
+/// out before anything gets a chance to measure the window.
+#[derive(Default)]
+pub struct LastWindowSize(std::sync::Mutex<Option<(f64, f64)>>);
+
+impl LastWindowSize {
+    pub fn set(&self, width: f64, height: f64) {
+        if let Ok(mut size) = self.0.lock() {
+            *size = Some((width, height));
+        }
+    }
+
+    pub fn get(&self) -> Option<(f64, f64)> {
+        self.0.lock().ok().and_then(|size| *size)
+    }
+}
+
+/// Read preferences, treating any problem as "no preferences yet".
+///
+/// Unlike the app config, a broken file here is not fatal. It holds recoverable
+/// user state, and refusing to start because someone corrupted their remembered
+/// window size would be a worse failure than forgetting it.
+pub fn load_preferences(dir: Option<&Path>) -> Preferences {
+    let Some(path) = dir.map(|d| d.join(PREFERENCES_FILENAME)) else {
+        return Preferences::default();
+    };
+
+    let Ok(contents) = std::fs::read_to_string(&path) else {
+        return Preferences::default();
+    };
+
+    match serde_json::from_str(&contents) {
+        Ok(preferences) => preferences,
+        Err(e) => {
+            log::warn!("Ignoring unreadable {}: {}", path.display(), e);
+            Preferences::default()
+        }
+    }
+}
+
+pub fn save_preferences(dir: &Path, preferences: &Preferences) -> Result<(), String> {
+    std::fs::create_dir_all(dir)
+        .map_err(|e| format!("Could not create {}: {}", dir.display(), e))?;
+
+    let contents = serde_json::to_string_pretty(preferences)
+        .map_err(|e| format!("Could not serialize preferences: {}", e))?;
+
+    std::fs::write(dir.join(PREFERENCES_FILENAME), contents)
+        .map_err(|e| format!("Could not write preferences: {}", e))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
 
     fn scratch(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("turbo-desktop-config-{name}"));
@@ -386,6 +494,105 @@ mod tests {
         assert!(err.contains("not valid JSON"), "got: {err}");
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn no_preferences_means_the_configured_size() {
+        let config = WindowConfig::default();
+        let (width, height) = Preferences::default().window_size(&config);
+
+        assert_eq!((width, height), (config.width, config.height));
+    }
+
+    #[test]
+    fn a_remembered_size_is_used() {
+        let preferences = Preferences {
+            window: Some(WindowPreferences {
+                width: 1440.0,
+                height: 900.0,
+            }),
+        };
+
+        assert_eq!(
+            preferences.window_size(&WindowConfig::default()),
+            (1440.0, 900.0)
+        );
+    }
+
+    #[test]
+    fn an_unusable_remembered_size_falls_back() {
+        let config = WindowConfig::default();
+
+        for (width, height) in [
+            (0.0, 0.0),
+            (-1200.0, -800.0),
+            (f64::NAN, f64::NAN),
+            (f64::INFINITY, f64::INFINITY),
+            // Below the app's own minimum.
+            (config.min_width - 1.0, config.min_height - 1.0),
+        ] {
+            let preferences = Preferences {
+                window: Some(WindowPreferences { width, height }),
+            };
+
+            assert_eq!(
+                preferences.window_size(&config),
+                (config.width, config.height),
+                "({width}, {height}) should not produce a window the user cannot use"
+            );
+        }
+    }
+
+    #[test]
+    fn preferences_cannot_carry_policy() {
+        // Someone editing their own preferences file cannot grant the app
+        // anything: the type has nowhere to put these keys, so they are dropped.
+        let preferences: Preferences = serde_json::from_str(
+            r#"{
+                "window": { "width": 1000, "height": 700 },
+                "sudo": { "enabled": true, "allowed_commands": ["rm -rf /"] },
+                "filesystem": { "allowed_roots": ["/"] },
+                "server_url": "https://evil.example.com"
+            }"#,
+        )
+        .expect("unknown keys should be ignored, not rejected");
+
+        assert_eq!(
+            preferences,
+            Preferences {
+                window: Some(WindowPreferences {
+                    width: 1000.0,
+                    height: 700.0
+                })
+            }
+        );
+    }
+
+    #[test]
+    fn unreadable_preferences_are_ignored_rather_than_fatal() {
+        let dir = scratch("prefs-malformed");
+        std::fs::write(dir.join(PREFERENCES_FILENAME), "{ not json").unwrap();
+
+        assert_eq!(load_preferences(Some(&dir)), Preferences::default());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn preferences_round_trip_through_the_config_directory() {
+        let dir = scratch("prefs-roundtrip").join("nested");
+        let preferences = Preferences {
+            window: Some(WindowPreferences {
+                width: 1024.0,
+                height: 768.0,
+            }),
+        };
+
+        // The directory does not exist yet — saving should create it.
+        save_preferences(&dir, &preferences).expect("preferences should save");
+        assert_eq!(load_preferences(Some(&dir)), preferences);
+
+        std::fs::remove_dir_all(dir.parent().unwrap()).ok();
     }
 
     #[test]
