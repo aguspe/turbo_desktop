@@ -117,30 +117,21 @@ fn compile(config: &PathConfiguration) -> Vec<CompiledRule> {
 
 /// Thread-safe container for the active path configuration.
 ///
-/// Holds the parsed configuration alongside its compiled patterns so that
-/// matching a path does not recompile every regex.
+/// Rules are stored with their patterns already compiled, so matching a path
+/// does not recompile every regex.
 pub struct PathConfigurationStore {
-    config: RwLock<Option<PathConfiguration>>,
     compiled: RwLock<Vec<CompiledRule>>,
 }
 
 impl PathConfigurationStore {
     pub fn new() -> Self {
         Self {
-            config: RwLock::new(None),
             compiled: RwLock::new(Vec::new()),
         }
     }
 
     pub fn set(&self, config: PathConfiguration) {
-        let compiled = compile(&config);
-        *self.compiled.write().unwrap() = compiled;
-        *self.config.write().unwrap() = Some(config);
-    }
-
-    pub fn get(&self) -> Option<PathConfiguration> {
-        let store = self.config.read().unwrap();
-        store.clone()
+        *self.compiled.write().unwrap() = compile(&config);
     }
 
     /// Find the matching rule for a given URL path.
@@ -267,15 +258,4 @@ mod tests {
             Presentation::Native
         );
     }
-}
-
-/// Load path configuration from a local JSON file.
-pub fn load_path_configuration_from_file(path: &str) -> Result<PathConfiguration, String> {
-    let contents =
-        std::fs::read_to_string(path).map_err(|e| format!("Failed to read file: {}", e))?;
-
-    let config: PathConfiguration =
-        serde_json::from_str(&contents).map_err(|e| format!("Failed to parse JSON: {}", e))?;
-
-    Ok(config)
 }

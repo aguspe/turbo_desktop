@@ -112,7 +112,6 @@ async fn handle_menu_item(
     match message.event.as_str() {
         "connect" => {
             let title = message.data["title"].as_str().unwrap_or("Menu Item");
-            let _shortcut = message.data["shortcut"].as_str();
 
             log::info!("Bridge: registering menu item '{}'", title);
 
