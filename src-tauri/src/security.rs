@@ -42,6 +42,19 @@ pub fn is_trusted_origin(server_url: &str, candidate: &Url) -> bool {
         && candidate.port_or_known_default() == server.port_or_known_default()
 }
 
+/// True for pages we ship inside the bundle, such as the offline waiting page.
+///
+/// These are our own static assets rather than anything fetched over the
+/// network, so they are trusted alongside the app origin. Tauri serves them
+/// from `tauri://localhost`, or `http://tauri.localhost` on Windows.
+pub fn is_bundled_app_origin(candidate: &Url) -> bool {
+    match candidate.scheme() {
+        "tauri" => true,
+        "http" | "https" => candidate.host_str() == Some("tauri.localhost"),
+        _ => false,
+    }
+}
+
 /// Reject a command call coming from any page that is not the app origin.
 ///
 /// Tauri's ACL only covers plugin commands, so every app-defined command that
@@ -57,7 +70,7 @@ pub fn ensure_trusted_caller(
         .url()
         .map_err(|e| format!("Could not determine the calling page: {}", e))?;
 
-    if is_trusted_origin(&config.server_url, &url) {
+    if is_trusted_origin(&config.server_url, &url) || is_bundled_app_origin(&url) {
         return Ok(());
     }
 
@@ -288,6 +301,20 @@ mod tests {
             "https://example.com",
             &url("https://notexample.com/")
         ));
+    }
+
+    #[test]
+    fn bundled_pages_are_trusted() {
+        assert!(is_bundled_app_origin(&url("tauri://localhost/index.html")));
+        assert!(is_bundled_app_origin(&url("http://tauri.localhost/index.html")));
+    }
+
+    #[test]
+    fn remote_pages_are_not_bundled_pages() {
+        assert!(!is_bundled_app_origin(&url("https://evil.example.com/")));
+        assert!(!is_bundled_app_origin(&url("http://localhost:3000/")));
+        // A host that merely ends with the bundled host must not pass.
+        assert!(!is_bundled_app_origin(&url("https://evil.tauri.localhost.example.com/")));
     }
 
     #[test]

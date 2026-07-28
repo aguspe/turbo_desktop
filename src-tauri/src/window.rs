@@ -12,7 +12,9 @@ pub struct TurboDesktopConfig {
     /// Application name shown in the title bar and menu
     #[serde(default = "default_app_name")]
     pub app_name: String,
-    /// User-Agent string appended to the WebView's default UA
+    /// User-Agent the webview sends. This replaces the browser's own string
+    /// rather than extending it, so keep the "Turbo Desktop" token — the Rails
+    /// gem's detection matches on it.
     #[serde(default = "default_user_agent")]
     pub user_agent: String,
     /// Window configuration

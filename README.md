@@ -105,6 +105,14 @@ pages on that exact origin (scheme, host and port). A page from anywhere else �
 an off-site link, a redirect, an embedded frame — gets a refusal instead of
 native access. See [Bridge security](#bridge-security).
 
+The window is created from this file at startup, so `app_name`, `user_agent` and
+the `window` block all take effect. `user_agent` **replaces** the webview's own
+string rather than extending it, so keep the `Turbo Desktop` token — the Rails
+gem's `turbo_desktop_app?` and the `turbo_desktop_only` helper match on it.
+
+If the server is not reachable when the app launches, it opens a bundled page
+that waits and redirects once your server answers.
+
 ### 3. Add the Rails gem
 
 ```ruby
