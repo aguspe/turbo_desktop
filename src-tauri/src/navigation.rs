@@ -29,8 +29,11 @@ pub struct VisitResponse {
 #[tauri::command]
 pub async fn handle_visit_proposal(
     app: tauri::AppHandle,
+    webview: tauri::Webview,
     proposal: VisitProposal,
 ) -> Result<VisitResponse, String> {
+    crate::security::ensure_trusted_caller(&app, &webview)?;
+
     let config_store = app.state::<Arc<PathConfigurationStore>>();
     let properties = config_store.properties_for_path(&proposal.path);
 
@@ -61,7 +64,7 @@ pub async fn handle_visit_proposal(
             let window = WebviewWindowBuilder::new(
                 &app,
                 &label,
-                WebviewUrl::External(proposal.url.parse().map_err(|e| format!("{}", e))?),
+                WebviewUrl::External(same_origin_url(&app, &proposal.url)?),
             )
             .title(properties.title.unwrap_or_else(|| "".into()))
             .inner_size(800.0, 600.0)
@@ -83,7 +86,7 @@ pub async fn handle_visit_proposal(
             let window = WebviewWindowBuilder::new(
                 &app,
                 &label,
-                WebviewUrl::External(proposal.url.parse().map_err(|e| format!("{}", e))?),
+                WebviewUrl::External(same_origin_url(&app, &proposal.url)?),
             )
             .title(properties.title.unwrap_or_else(|| "Turbo Desktop".into()))
             .inner_size(1200.0, 800.0)
@@ -115,9 +118,38 @@ pub async fn handle_visit_proposal(
     }
 }
 
+/// Parse a proposed URL and confirm it stays on the app origin.
+///
+/// A proposal names the URL a new window will open, and we inject the bridge
+/// into that window — so a proposal pointing at someone else's site would hand
+/// them a window carrying our API.
+fn same_origin_url(app: &tauri::AppHandle, raw: &str) -> Result<url::Url, String> {
+    let config = app.state::<crate::window::TurboDesktopConfig>();
+    let url: url::Url = raw
+        .parse()
+        .map_err(|e| format!("Invalid visit proposal URL '{}': {}", raw, e))?;
+
+    if crate::security::is_trusted_origin(&config.server_url, &url) {
+        Ok(url)
+    } else {
+        log::warn!("Navigation: refused a visit proposal to '{}'", url);
+        Err(format!(
+            "Refused: '{}' is not on the configured app origin",
+            raw
+        ))
+    }
+}
+
 /// Update the window title from the web page's <title> tag.
 #[tauri::command]
-pub async fn update_window_title(window: tauri::Window, title: String) -> Result<(), String> {
+pub async fn update_window_title(
+    app: tauri::AppHandle,
+    webview: tauri::Webview,
+    window: tauri::Window,
+    title: String,
+) -> Result<(), String> {
+    crate::security::ensure_trusted_caller(&app, &webview)?;
+
     window
         .set_title(&title)
         .map_err(|e| format!("Failed to set title: {}", e))?;
@@ -126,7 +158,13 @@ pub async fn update_window_title(window: tauri::Window, title: String) -> Result
 
 /// Signal that a page has finished loading (Turbo Drive "load" event).
 #[tauri::command]
-pub async fn page_loaded(app: tauri::AppHandle, url: String) -> Result<(), String> {
+pub async fn page_loaded(
+    app: tauri::AppHandle,
+    webview: tauri::Webview,
+    url: String,
+) -> Result<(), String> {
+    crate::security::ensure_trusted_caller(&app, &webview)?;
+
     log::info!("Page loaded: {}", url);
     app.emit("turbo:load", &url)
         .map_err(|e| format!("{}", e))?;
@@ -135,7 +173,13 @@ pub async fn page_loaded(app: tauri::AppHandle, url: String) -> Result<(), Strin
 
 /// Signal that a page started loading (Turbo Drive "before-visit" event).
 #[tauri::command]
-pub async fn page_loading(app: tauri::AppHandle, url: String) -> Result<(), String> {
+pub async fn page_loading(
+    app: tauri::AppHandle,
+    webview: tauri::Webview,
+    url: String,
+) -> Result<(), String> {
+    crate::security::ensure_trusted_caller(&app, &webview)?;
+
     log::info!("Page loading: {}", url);
     app.emit("turbo:before-visit", &url)
         .map_err(|e| format!("{}", e))?;
@@ -144,7 +188,13 @@ pub async fn page_loading(app: tauri::AppHandle, url: String) -> Result<(), Stri
 
 /// Close a modal window by label.
 #[tauri::command]
-pub async fn close_modal(app: tauri::AppHandle, label: String) -> Result<(), String> {
+pub async fn close_modal(
+    app: tauri::AppHandle,
+    webview: tauri::Webview,
+    label: String,
+) -> Result<(), String> {
+    crate::security::ensure_trusted_caller(&app, &webview)?;
+
     if let Some(window) = app.get_webview_window(&label) {
         window
             .close()

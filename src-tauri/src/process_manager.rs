@@ -49,6 +49,7 @@ impl ProcessManager {
     }
 
     /// Number of processes currently in the Running state.
+    #[cfg(test)]
     pub async fn running_count(&self) -> usize {
         self.processes
             .lock()
