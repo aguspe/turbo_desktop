@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -192,5 +194,22 @@ test("the published package carries everything the scaffold copies", () => {
   assert.ok(
     files.some((f) => f.startsWith("src-tauri/Cargo.toml")),
     "the scaffolded project needs a Cargo.toml"
+  );
+});
+
+test("missing prerequisites stop before anything is created", () => {
+  // An empty PATH makes every prerequisite unavailable.
+  const result = spawnSync(
+    process.execPath,
+    [join(PACKAGE_ROOT, "cli", "turbo-desktop.js"), "new", "scratch-app"],
+    { cwd: mkdtempSync(join(tmpdir(), "turbo-desktop-preflight-")), env: { PATH: "" }, encoding: "utf-8" }
+  );
+
+  assert.equal(result.status, 1, "a missing prerequisite should be a clean exit, not a crash");
+  assert.match(result.stderr, /Rails is not installed/);
+  assert.doesNotMatch(
+    result.stderr,
+    /at \w+ \(node:/,
+    "a stack trace buries the thing the reader needs to see"
   );
 });
