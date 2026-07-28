@@ -292,6 +292,41 @@ window stays interactive. A blocking sheet needs AppKit APIs Tauri does not
 expose. Secondary windows (`new_window`) are meant to stand alone and are not
 attached.
 
+### Refreshing when you come back
+
+Mobile shells reload when the app returns to the foreground, and data goes stale
+here for the same reason. A desktop window loses focus far more often though —
+every glance at another app — so this is opt-in and waits for an absence long
+enough to matter:
+
+```json
+{
+  "navigation": {
+    "refresh_after_seconds": 300
+  }
+}
+```
+
+Coming back sooner than that does nothing. Omit the key, or set it to `0`, and
+the shell never refreshes on its own.
+
+A refresh goes through Turbo when it is present, so with `turbo-refresh-method`
+set to `morph` the page updates in place rather than being thrown away.
+
+**It will not interrupt someone typing.** If the focus is in a field or a
+contenteditable element when the window returns, the refresh is skipped — losing
+half a form is worse than showing data a few seconds old.
+
+Every return is announced whether or not a refresh is proposed, so an app can
+revalidate its own way, or veto a refresh it knows is unsafe:
+
+```js
+document.addEventListener("turbo-desktop:focus", (event) => {
+  const { awaySeconds, refreshing } = event.detail
+  if (refreshing && hasUnsavedChanges()) event.preventDefault()
+})
+```
+
 ### External links
 
 Links to anywhere other than your app open in the system browser, the same way

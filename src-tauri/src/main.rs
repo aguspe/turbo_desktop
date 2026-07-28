@@ -36,6 +36,7 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(process_manager::ProcessManager::new())
         .manage(window::LastWindowSize::default())
+        .manage(window::FocusTracker::default())
         // Inject turbo-desktop.js into every page load across all webviews.
         .on_page_load(|webview, payload| {
             if let PageLoadEvent::Finished = payload.event() {
@@ -145,8 +146,9 @@ fn main() {
             // This is a fallback for exits that reach us after the window is gone;
             // normally the size is read from the window itself on the way out.
             let size_handle = app.handle().clone();
-            main_window.on_window_event(move |event| {
-                if let tauri::WindowEvent::Resized(size) = event {
+            let focus_config = shell_defaults.navigation.clone();
+            main_window.on_window_event(move |event| match event {
+                tauri::WindowEvent::Resized(size) => {
                     if let Some(window) = size_handle.get_webview_window("main") {
                         if let Ok(scale) = window.scale_factor() {
                             size_handle.state::<window::LastWindowSize>().set(
@@ -156,6 +158,10 @@ fn main() {
                         }
                     }
                 }
+                tauri::WindowEvent::Focused(focused) => {
+                    on_focus_changed(&size_handle, &focus_config, *focused);
+                }
+                _ => {}
             });
 
             // Fetch path configuration from the server in the background
@@ -227,6 +233,42 @@ fn main() {
                 tauri::async_runtime::block_on(pm.kill_all());
             }
         });
+}
+
+/// Tell the page the window came back, and whether it is due a refresh.
+///
+/// The decision is made here because the threshold lives in the config, but it
+/// is only a proposal: the page can refuse it, and does by default when someone
+/// is typing.
+fn on_focus_changed(
+    app: &tauri::AppHandle,
+    config: &window::NavigationConfig,
+    focused: bool,
+) {
+    let tracker = app.state::<window::FocusTracker>();
+
+    if !focused {
+        tracker.left();
+        return;
+    }
+
+    // No recorded absence means this is the window opening, not returning.
+    let Some(away_seconds) = tracker.returned() else {
+        return;
+    };
+
+    let refreshing = window::should_refresh_after(config, away_seconds);
+    if refreshing {
+        log::info!("Back after {}s — proposing a refresh", away_seconds);
+    }
+
+    if let Some(main) = app.get_webview_window("main") {
+        window::deliver_to_page(
+            &main,
+            "focus",
+            &serde_json::json!({ "awaySeconds": away_seconds, "refreshing": refreshing }),
+        );
+    }
 }
 
 /// Hand a URL to whatever the operating system uses for it.
