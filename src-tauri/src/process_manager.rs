@@ -147,11 +147,6 @@ impl ProcessManager {
             .collect()
     }
 
-    /// Remove a process entry (cleanup after exit).
-    pub async fn remove(&self, id: &str) {
-        self.processes.lock().await.remove(id);
-    }
-
     /// Kill all running processes (called on app exit).
     pub async fn kill_all(&self) {
         let mut procs = self.processes.lock().await;

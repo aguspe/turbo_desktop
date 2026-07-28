@@ -159,7 +159,6 @@ function cmdInit(args) {
     "main.rs",
     "bridge.rs",
     "config.rs",
-    "deep_link.rs",
     "fs_bridge.rs",
     "menu.rs",
     "navigation.rs",

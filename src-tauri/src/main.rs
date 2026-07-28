@@ -3,7 +3,6 @@
 
 mod bridge;
 mod config;
-mod deep_link;
 mod fs_bridge;
 mod menu;
 mod navigation;
@@ -26,7 +25,6 @@ fn main() {
     // Load the app configuration (server URL, window size, etc.)
     let app_config = window::load_config(None).expect("Failed to load turbo-desktop config");
     let server_url = app_config.server_url.clone();
-    let _user_agent = app_config.user_agent.clone();
     let app_name = app_config.app_name.clone();
     let path_config_url = window::path_config_url(&app_config);
 
