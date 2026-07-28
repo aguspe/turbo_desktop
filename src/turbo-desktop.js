@@ -21,7 +21,7 @@
   // ─── Core API ──────────────────────────────────────────────────────────────
 
   const TurboDesktop = {
-    version: "0.1.0",
+    version: "0.1.1",
     platform: "macos",
     isNative: true,
 

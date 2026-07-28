@@ -8,6 +8,7 @@ mod fs_bridge;
 mod menu;
 mod navigation;
 mod process_manager;
+mod security;
 mod shell_bridge;
 mod sudo_bridge;
 mod tray;
@@ -71,10 +72,12 @@ fn main() {
             // Set the window title to the app name
             main_window.set_title(&app_name).ok();
 
-            // Navigate to the Rails server URL
+            // Navigate to the Rails server URL. The URL is JSON-encoded rather than
+            // quoted by hand so a quote in it cannot break out into script.
             let url: url::Url = server_url.parse().expect("Invalid server URL");
+            let encoded = serde_json::to_string(url.as_str()).expect("URL should serialize");
             main_window
-                .eval(&format!("window.location.replace('{}')", url))
+                .eval(&format!("window.location.replace({})", encoded))
                 .ok();
 
             // Fetch path configuration from the server in the background

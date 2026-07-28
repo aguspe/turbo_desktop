@@ -18,6 +18,47 @@ pub struct TurboDesktopConfig {
     /// Window configuration
     #[serde(default)]
     pub window: WindowConfig,
+    /// What the filesystem bridge component is allowed to touch
+    #[serde(default)]
+    pub filesystem: FilesystemConfig,
+    /// Whether — and which — commands may run with administrator privileges
+    #[serde(default)]
+    pub sudo: SudoConfig,
+}
+
+/// Filesystem bridge policy.
+///
+/// Defaults to the app data directory only; an app that needs wider access
+/// names the roots it needs.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FilesystemConfig {
+    /// Absolute paths (or `~/...`) the bridge may read and write under.
+    #[serde(default)]
+    pub allowed_roots: Vec<String>,
+}
+
+/// Sudo bridge policy. Disabled unless the app opts in and lists commands.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SudoConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// Commands that may be run as administrator. Matched whole, or as a
+    /// prefix up to a word boundary (`"brew install"` allows `brew install ruby`).
+    #[serde(default)]
+    pub allowed_commands: Vec<String>,
+    /// Show a dialog naming the command before the system password prompt.
+    #[serde(default = "default_true")]
+    pub confirm: bool,
+}
+
+impl Default for SudoConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            allowed_commands: Vec::new(),
+            confirm: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,6 +137,8 @@ pub fn load_config(path: Option<&str>) -> Result<TurboDesktopConfig, String> {
             app_name: "Turbo Desktop".into(),
             user_agent: default_user_agent(),
             window: WindowConfig::default(),
+            filesystem: FilesystemConfig::default(),
+            sudo: SudoConfig::default(),
         })
     }
 }

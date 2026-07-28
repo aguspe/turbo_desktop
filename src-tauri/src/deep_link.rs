@@ -16,13 +16,34 @@ pub fn handle_deep_link(app: &tauri::AppHandle, urls: Vec<url::Url>) {
             continue;
         }
 
-        // Get the server URL from the app config
+        // Resolve the path against the configured server. Joining through the URL
+        // parser keeps a hostile deep link from redirecting to another origin, and
+        // JSON-encoding keeps it from breaking out of the string into script.
         let config = app.state::<crate::window::TurboDesktopConfig>();
-        let target_url = format!("{}{}", config.server_url, path);
+        let Ok(server) = url::Url::parse(&config.server_url) else {
+            log::warn!("Deep link ignored: server_url is not a valid URL");
+            continue;
+        };
+        let Ok(target) = server.join(path) else {
+            log::warn!("Deep link ignored: could not resolve path '{}'", path);
+            continue;
+        };
+        if !crate::security::is_trusted_origin(&config.server_url, &target) {
+            log::warn!("Deep link ignored: '{}' leaves the app origin", target);
+            continue;
+        }
+        let target_url = target.to_string();
 
         // Navigate the main window to the target URL
         if let Some(window) = app.get_webview_window("main") {
-            let js = format!("window.location.href = '{}'", target_url);
+            let encoded = match serde_json::to_string(&target_url) {
+                Ok(encoded) => encoded,
+                Err(e) => {
+                    log::warn!("Deep link ignored: could not encode target: {}", e);
+                    continue;
+                }
+            };
+            let js = format!("window.location.href = {}", encoded);
             let _ = window.eval(&js);
 
             // Ensure the window is visible and focused

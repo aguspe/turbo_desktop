@@ -30,6 +30,11 @@ struct ProcessEntry {
     kill_sender: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
+/// Ceiling on processes running at once, so a runaway caller cannot spawn
+/// without bound. Exited entries stay in the map for status queries and do not
+/// count against it.
+const MAX_RUNNING_PROCESSES: usize = 64;
+
 /// Shared state for tracking active child processes.
 /// Registered via `app.manage()` in main.rs.
 pub struct ProcessManager {
@@ -43,18 +48,43 @@ impl ProcessManager {
         }
     }
 
+    /// Number of processes currently in the Running state.
+    pub async fn running_count(&self) -> usize {
+        self.processes
+            .lock()
+            .await
+            .values()
+            .filter(|e| matches!(e.info.status, ProcessStatus::Running))
+            .count()
+    }
+
     /// Register a new process with status Running.
+    ///
+    /// Fails once `MAX_RUNNING_PROCESSES` are already running.
     pub async fn register(
         &self,
         id: String,
         command: String,
         args: Vec<String>,
         kill_sender: tokio::sync::oneshot::Sender<()>,
-    ) {
+    ) -> Result<(), String> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
+
+        let mut procs = self.processes.lock().await;
+
+        let running = procs
+            .values()
+            .filter(|e| matches!(e.info.status, ProcessStatus::Running))
+            .count();
+        if running >= MAX_RUNNING_PROCESSES {
+            return Err(format!(
+                "Refused: {} processes are already running (limit {})",
+                running, MAX_RUNNING_PROCESSES
+            ));
+        }
 
         let entry = ProcessEntry {
             info: ProcessInfo {
@@ -67,7 +97,8 @@ impl ProcessManager {
             kill_sender: Some(kill_sender),
         };
 
-        self.processes.lock().await.insert(id, entry);
+        procs.insert(id, entry);
+        Ok(())
     }
 
     /// Send a kill signal to a running process.
@@ -129,5 +160,50 @@ impl ProcessManager {
                 entry.info.status = ProcessStatus::Killed;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn register(pm: &ProcessManager, id: &str) -> Result<(), String> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        // Keep the receiver alive so the entry looks like a live process.
+        std::mem::forget(rx);
+        pm.register(id.to_string(), "sleep".into(), vec!["1".into()], tx)
+            .await
+    }
+
+    #[tokio::test]
+    async fn refuses_to_exceed_the_running_limit() {
+        let pm = ProcessManager::new();
+
+        for i in 0..MAX_RUNNING_PROCESSES {
+            register(&pm, &format!("p{i}"))
+                .await
+                .expect("registration below the limit should succeed");
+        }
+        assert_eq!(pm.running_count().await, MAX_RUNNING_PROCESSES);
+
+        let err = register(&pm, "one-too-many")
+            .await
+            .expect_err("registration past the limit should be refused");
+        assert!(err.contains("already running"), "unexpected error: {err}");
+    }
+
+    #[tokio::test]
+    async fn exited_processes_free_up_capacity() {
+        let pm = ProcessManager::new();
+
+        for i in 0..MAX_RUNNING_PROCESSES {
+            register(&pm, &format!("p{i}")).await.unwrap();
+        }
+        pm.mark_exited("p0", Some(0)).await;
+
+        assert_eq!(pm.running_count().await, MAX_RUNNING_PROCESSES - 1);
+        register(&pm, "replacement")
+            .await
+            .expect("a finished process should free a slot");
     }
 }

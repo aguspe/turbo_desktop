@@ -10,15 +10,13 @@
  *   build  — Build the desktop app for distribution
  */
 
-import { execSync, spawn } from "child_process";
+import { execSync, spawn, spawnSync } from "child_process";
 import { existsSync, mkdirSync, writeFileSync, copyFileSync, readFileSync, appendFileSync } from "fs";
-import { resolve, dirname, join } from "path";
+import { resolve, dirname, join, basename } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = resolve(__dirname, "..");
-
-const [, , command, ...args] = process.argv;
 
 const COMMANDS = {
   new: cmdNew,
@@ -28,18 +26,24 @@ const COMMANDS = {
   help: cmdHelp,
 };
 
-const handler = COMMANDS[command];
-if (!handler) {
-  console.error(
-    command
-      ? `Unknown command: ${command}`
-      : "Usage: turbo-desktop <command> [options]"
-  );
-  cmdHelp();
-  process.exit(1);
-}
+// Only dispatch when run as a program. Importing this file (from the tests, say)
+// should expose the helpers without scaffolding anything.
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const [, , command, ...args] = process.argv;
+  const handler = COMMANDS[command];
 
-handler(args);
+  if (!handler) {
+    console.error(
+      command
+        ? `Unknown command: ${command}`
+        : "Usage: turbo-desktop <command> [options]"
+    );
+    cmdHelp();
+    process.exit(1);
+  }
+
+  handler(args);
+}
 
 // ─── Commands ────────────────────────────────────────────────────────────────
 
@@ -88,7 +92,7 @@ function cmdNew(args) {
 
   // Step 1: Create the Rails app
   console.log(`\nCreating Rails app: ${appName}...\n`);
-  execSync(`rails new ${appName} --skip-jbuilder`, { stdio: "inherit" });
+  run("rails", ["new", appName, "--skip-jbuilder"], { stdio: "inherit" });
 
   // Step 2: Add the turbo_desktop-rails gem
   console.log("\nAdding turbo_desktop-rails gem...");
@@ -149,16 +153,23 @@ function cmdInit(args) {
   mkdirSync(join(desktopDir, "src-tauri", "capabilities"), { recursive: true });
   mkdirSync(join(desktopDir, "src"), { recursive: true });
 
-  // Copy Rust source files
+  // Copy Rust source files. This list must cover every `mod` declared in main.rs,
+  // otherwise the scaffolded project will not compile.
   const rustFiles = [
     "main.rs",
-    "config.rs",
-    "navigation.rs",
     "bridge.rs",
-    "menu.rs",
-    "window.rs",
-    "tray.rs",
+    "config.rs",
     "deep_link.rs",
+    "fs_bridge.rs",
+    "menu.rs",
+    "navigation.rs",
+    "process_manager.rs",
+    "security.rs",
+    "shell_bridge.rs",
+    "sudo_bridge.rs",
+    "tray.rs",
+    "updater_bridge.rs",
+    "window.rs",
   ];
   for (const file of rustFiles) {
     copyFileSync(
@@ -184,7 +195,7 @@ function cmdInit(args) {
   if (iconPath) {
     console.log(`\nGenerating app icons from ${iconPath}...`);
     try {
-      execSync(`cargo tauri icon "${iconPath}"`, { cwd: desktopDir, stdio: "inherit" });
+      run("cargo", ["tauri", "icon", iconPath], { cwd: desktopDir, stdio: "inherit" });
     } catch {
       console.warn(
         "\n  Could not generate icons automatically (is tauri-cli installed?).\n" +
@@ -238,17 +249,26 @@ function cmdInit(args) {
     join(desktopDir, "package.json")
   );
 
-  // Create the app config file
+  // Create the app config file. The filesystem and sudo bridges start closed —
+  // an app widens them by naming the roots and commands it actually needs.
   const config = {
     server_url: "http://localhost:3000",
     app_name: guessAppName(projectDir),
-    user_agent: "Turbo Desktop/0.1.0 (macOS; aarch64)",
+    user_agent: defaultUserAgent(),
     window: {
       width: 1200,
       height: 800,
       min_width: 800,
       min_height: 600,
       resizable: true,
+    },
+    filesystem: {
+      allowed_roots: [],
+    },
+    sudo: {
+      enabled: false,
+      allowed_commands: [],
+      confirm: true,
     },
   };
 
@@ -397,9 +417,36 @@ Examples:
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+// Run a command without a shell, so arguments carrying spaces, quotes or
+// semicolons stay arguments instead of turning into extra commands.
+export function run(command, args, options = {}) {
+  const result = spawnSync(command, args, { stdio: "inherit", ...options });
+
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`${command} exited with status ${result.status}`);
+  }
+  return result;
+}
+
+export function packageVersion() {
+  const pkg = JSON.parse(readFileSync(join(PACKAGE_ROOT, "package.json"), "utf-8"));
+  return pkg.version;
+}
+
+export function defaultUserAgent() {
+  const os =
+    { darwin: "macOS", win32: "Windows", linux: "Linux" }[process.platform] ||
+    process.platform;
+  const arch =
+    { arm64: "aarch64", x64: "x86_64" }[process.arch] || process.arch;
+
+  return `Turbo Desktop/${packageVersion()} (${os}; ${arch})`;
+}
+
 // Pull an optional `--icon <file>` flag out of args. Returns the resolved
 // absolute icon path (or null) and the remaining positional args.
-function extractIconFlag(args) {
+export function extractIconFlag(args) {
   const i = args.indexOf("--icon");
   if (i === -1) return { iconPath: null, rest: args };
 
@@ -413,7 +460,7 @@ function extractIconFlag(args) {
   return { iconPath: resolve(value), rest };
 }
 
-function defaultBuildTarget() {
+export function defaultBuildTarget() {
   const arch = process.arch === "arm64" ? "aarch64" : "x86_64";
   const platform = process.platform;
   if (platform === "darwin") return `${arch}-apple-darwin`;
@@ -422,10 +469,9 @@ function defaultBuildTarget() {
   return `${arch}-apple-darwin`; // fallback
 }
 
-function guessAppName(projectDir) {
-  const resolved = resolve(projectDir);
-  const basename = resolved.split("/").pop() || "My App";
-  return basename
+export function guessAppName(projectDir) {
+  const name = basename(resolve(projectDir)) || "My App";
+  return name
     .replace(/[_-]/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
