@@ -1,5 +1,5 @@
 /**
- * @turbo-desktop/bridge — TypeScript definitions
+ * turbo-desktop-bridge — TypeScript definitions
  *
  * Re-exports all types from the turbo-desktop.js bridge.
  */

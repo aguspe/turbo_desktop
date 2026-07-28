@@ -1,5 +1,5 @@
 {
-  "name": "@turbo-desktop/bridge",
+  "name": "turbo-desktop-bridge",
   "version": "0.1.1",
   "description": "JavaScript bridge for Turbo Desktop — typed imports for the turbo-desktop.js API",
   "type": "module",
