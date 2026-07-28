@@ -133,6 +133,74 @@ fn same_origin_url(app: &tauri::AppHandle, raw: &str) -> Result<url::Url, String
     }
 }
 
+/// What the screen underneath should do once a modal closes.
+///
+/// Named after Hotwire Native's dismissal semantics, so the same words describe
+/// the same outcome on mobile and desktop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Dismissal {
+    /// Go back, as if the modal had never been opened.
+    Recede,
+    /// Stay where it is, but reload — the usual choice after a form submits.
+    Refresh,
+    /// Leave it exactly as it was.
+    Resume,
+}
+
+impl Dismissal {
+    pub fn parse(value: Option<&str>) -> Self {
+        match value.unwrap_or("resume") {
+            "recede" => Self::Recede,
+            "refresh" => Self::Refresh,
+            _ => Self::Resume,
+        }
+    }
+
+    /// The instruction handed to the page underneath.
+    pub fn action(&self) -> &'static str {
+        match self {
+            Self::Recede => "back",
+            Self::Refresh => "refresh",
+            Self::Resume => "none",
+        }
+    }
+}
+
+/// Close a modal and tell the screen underneath what to do next.
+///
+/// `label` defaults to the calling window, so a page can dismiss itself without
+/// knowing which window it was opened in.
+#[tauri::command]
+pub async fn dismiss_modal(
+    app: tauri::AppHandle,
+    webview: tauri::Webview,
+    label: Option<String>,
+    then: Option<String>,
+) -> Result<(), String> {
+    crate::security::ensure_trusted_caller(&app, &webview)?;
+
+    let label = label.unwrap_or_else(|| webview.label().to_string());
+    let dismissal = Dismissal::parse(then.as_deref());
+
+    if let Some(window) = app.get_webview_window(&label) {
+        window
+            .close()
+            .map_err(|e| format!("Failed to close '{}': {}", label, e))?;
+    }
+
+    log::info!("Dismissed '{}' with {:?}", label, dismissal);
+
+    if let Some(main) = app.get_webview_window("main") {
+        crate::window::deliver_to_page(
+            &main,
+            "navigate",
+            &serde_json::json!({ "action": dismissal.action() }),
+        );
+    }
+
+    Ok(())
+}
+
 /// Open a modal or secondary window carrying the shell's configuration.
 ///
 /// Both presentations differ only in their label, title and default size, and
@@ -148,7 +216,7 @@ fn open_child_window(
     let url = same_origin_url(app, raw_url)?;
     let config = app.state::<crate::window::TurboDesktopConfig>();
 
-    let window = crate::window::apply_shell_defaults(
+    let mut builder = crate::window::apply_shell_defaults(
         WebviewWindowBuilder::new(app, label, WebviewUrl::External(url)),
         app,
         &config,
@@ -156,9 +224,25 @@ fn open_child_window(
     )
     .title(title)
     .inner_size(width, height)
-    .resizable(true)
-    .build()
-    .map_err(|e| format!("Failed to create window '{}': {}", label, e))?;
+    .resizable(true);
+
+    // Tie a modal to the window it came from, so it travels with it and closes
+    // with it rather than being left behind as an orphan. Secondary windows are
+    // meant to stand alone, so they are not parented.
+    //
+    // This is ownership, not modality: the main window stays interactive. A true
+    // blocking sheet needs AppKit APIs that Tauri does not expose.
+    if label.starts_with("modal-") {
+        if let Some(parent) = app.get_webview_window("main") {
+            builder = builder
+                .parent(&parent)
+                .map_err(|e| format!("Could not attach '{}' to the main window: {}", label, e))?;
+        }
+    }
+
+    let window = builder
+        .build()
+        .map_err(|e| format!("Failed to create window '{}': {}", label, e))?;
 
     inject_turbo_desktop_js(&window);
     Ok(())
@@ -255,6 +339,31 @@ pub async fn close_modal(
 fn inject_turbo_desktop_js(window: &tauri::WebviewWindow) {
     let js = include_str!("../../src/turbo-desktop.js");
     let _ = window.eval(js);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dismissal_defaults_to_leaving_the_screen_alone() {
+        assert_eq!(Dismissal::parse(None), Dismissal::Resume);
+        assert_eq!(Dismissal::parse(Some("nonsense")), Dismissal::Resume);
+    }
+
+    #[test]
+    fn dismissal_names_match_hotwire_native() {
+        assert_eq!(Dismissal::parse(Some("recede")), Dismissal::Recede);
+        assert_eq!(Dismissal::parse(Some("refresh")), Dismissal::Refresh);
+        assert_eq!(Dismissal::parse(Some("resume")), Dismissal::Resume);
+    }
+
+    #[test]
+    fn each_dismissal_instructs_the_page_underneath() {
+        assert_eq!(Dismissal::Recede.action(), "back");
+        assert_eq!(Dismissal::Refresh.action(), "refresh");
+        assert_eq!(Dismissal::Resume.action(), "none");
+    }
 }
 
 /// Simple unique ID generator (no external crate needed).

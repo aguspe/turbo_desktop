@@ -686,6 +686,39 @@ pub fn apply_shell_defaults<'a, M: tauri::Manager<tauri::Wry>>(
         })
 }
 
+/// Hand a message to the injected script in a webview.
+///
+/// Tauri's event API would be the obvious route, but reaching it from the page
+/// needs `withGlobalTauri`, which exposes the whole JS API to whatever the
+/// webview has loaded. Calling into our own injected object instead keeps the
+/// surface to one function, and works without the frontend bundling anything.
+///
+/// Both arguments are JSON-encoded, so neither can break out of the call.
+pub fn deliver_to_page(
+    window: &tauri::WebviewWindow,
+    kind: &str,
+    payload: &serde_json::Value,
+) {
+    let js = format!(
+        "window.__TURBO_DESKTOP__ && window.__TURBO_DESKTOP__.__receive({}, {})",
+        serde_json::to_string(kind).unwrap_or_else(|_| "null".into()),
+        serde_json::to_string(payload).unwrap_or_else(|_| "null".into()),
+    );
+
+    if let Err(e) = window.eval(&js) {
+        log::debug!("Could not deliver '{}' to {}: {}", kind, window.label(), e);
+    }
+}
+
+/// Deliver to every open webview.
+pub fn deliver_to_all(app: &tauri::AppHandle, kind: &str, payload: &serde_json::Value) {
+    use tauri::Manager;
+
+    for window in app.webview_windows().values() {
+        deliver_to_page(window, kind, payload);
+    }
+}
+
 /// Get information about the current window state.
 #[tauri::command]
 pub async fn get_window_info(

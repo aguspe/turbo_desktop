@@ -254,8 +254,25 @@ if (TurboDesktop.isModal) {
 TurboDesktop.windowLabel         // e.g. "modal-9b8b948"
 ```
 
-Note these are separate top-level windows rather than sheets attached to the
-main one, so they do not block interaction with it.
+#### Dismissing a modal
+
+Closing a modal usually means something for the screen underneath. The three
+outcomes are named after Hotwire Native's, and mean the same things:
+
+```js
+TurboDesktop.recede()    // close, and go back underneath
+TurboDesktop.refresh()   // close, and reload underneath — after a form submits
+TurboDesktop.resume()    // close, and leave underneath alone
+```
+
+`refresh()` goes through Turbo when it is present, so scroll position and
+morphing are preserved, and falls back to a reload when it is not.
+
+A modal is attached to the main window, so it travels with it and closes with
+it rather than being left behind. That is ownership, not modality: the main
+window stays interactive. A blocking sheet needs AppKit APIs Tauri does not
+expose. Secondary windows (`new_window`) are meant to stand alone and are not
+attached.
 
 ### External links
 
