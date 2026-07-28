@@ -89,20 +89,11 @@ function cmdNew(args) {
     process.exit(1);
   }
 
-  // Check prerequisites
-  try {
-    execSync("rails --version", { stdio: "pipe" });
-  } catch {
-    console.error("Error: Rails is not installed. Install it with: gem install rails");
-    process.exit(1);
-  }
-
-  try {
-    execSync("rustc --version", { stdio: "pipe" });
-  } catch {
-    console.error("Error: Rust is not installed. Install it from https://rustup.rs");
-    process.exit(1);
-  }
+  // Check prerequisites before creating anything, so a missing tool is a
+  // sentence rather than a half-built project.
+  requireTool("rails", "Rails is not installed. Install it with: gem install rails");
+  requireTool("bundle", "Bundler is not working. Check your Ruby installation.");
+  requireTool("rustc", "Rust is not installed. Install it from https://rustup.rs");
 
   // Step 1: Create the Rails app
   console.log(`\nCreating Rails app: ${appName}...\n`);
@@ -116,13 +107,32 @@ function cmdNew(args) {
     appendFileSync(gemfilePath, '\ngem "turbo_desktop-rails"\n');
   }
 
-  // Step 3: Bundle install
-  console.log("\nInstalling gems...\n");
-  execSync("bundle install", { cwd: appDir, stdio: "inherit" });
+  // Steps 3 and 4 run other people's tools against a Rails app that already
+  // exists on disk, so a failure here is worth explaining and resuming from
+  // rather than unwinding.
+  const finishByHand =
+    `Your Rails app was created. Once the problem above is sorted, finish with:\n\n` +
+    `  cd ${appName}\n` +
+    `  bundle install\n` +
+    `  bin/rails generate turbo_desktop:install\n` +
+    `  npx turbo-desktop init .\n`;
 
-  // Step 4: Run the install generator
+  console.log("\nInstalling gems...\n");
+  try {
+    run("bundle", ["install"], { cwd: appDir, stdio: "inherit" });
+  } catch {
+    fail(`bundle install failed in ${appName}/`, finishByHand);
+  }
+
   console.log("\nRunning turbo_desktop:install generator...\n");
-  execSync("bin/rails generate turbo_desktop:install", { cwd: appDir, stdio: "inherit" });
+  try {
+    run(join(appDir, "bin", "rails"), ["generate", "turbo_desktop:install"], {
+      cwd: appDir,
+      stdio: "inherit",
+    });
+  } catch {
+    fail(`the turbo_desktop:install generator failed in ${appName}/`, finishByHand);
+  }
 
   // Step 5: Scaffold the desktop shell (forwarding a custom icon if given)
   console.log("\nScaffolding desktop shell...\n");
@@ -467,6 +477,27 @@ export function run(command, args, options = {}) {
     throw new Error(`${command} exited with status ${result.status}`);
   }
   return result;
+}
+
+/**
+ * Stop with something the reader can act on.
+ *
+ * A failed step used to surface as a Node stack trace over whatever the tool
+ * printed, which buries the actual problem.
+ */
+export function fail(message, hint) {
+  console.error(`\nError: ${message}`);
+  if (hint) console.error(`\n${hint}`);
+  process.exit(1);
+}
+
+/** Check a command exists and runs, before we depend on it. */
+export function requireTool(command, message) {
+  const result = spawnSync(command, ["--version"], { stdio: "pipe" });
+
+  if (result.error || result.status !== 0) {
+    fail(message);
+  }
 }
 
 export function packageVersion() {
