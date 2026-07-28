@@ -292,6 +292,38 @@ window stays interactive. A blocking sheet needs AppKit APIs Tauri does not
 expose. Secondary windows (`new_window`) are meant to stand alone and are not
 attached.
 
+### Deep links
+
+A link from outside — an email, a calendar entry, another app — can open your
+app at a particular page:
+
+```
+task-manager://orders/123?ref=email
+```
+
+becomes a Turbo visit to `{server_url}/orders/123?ref=email`, so your path
+configuration still decides how it is presented.
+
+**The scheme is per app.** `turbo-desktop new` derives it from the app name and
+writes it into `tauri.conf.json`, along with a matching bundle identifier. It
+belongs there rather than in `turbo-desktop.config.json` because the operating
+system needs it at build time: macOS reads it from the app's `Info.plist`,
+Windows from a registry key written at install.
+
+That per-app choice matters. No desktop OS arbitrates duplicate scheme
+registrations in a way you control — on Windows the last installer wins, on
+macOS Launch Services decides — so if every app built on this shell shared one
+scheme, installing two of them would send one app's links to the other. Pick
+something distinctive: nothing stops unrelated software registering the same
+string.
+
+Links are resolved against `server_url` and refused if they point anywhere else.
+A deep link arrives from outside the app, so it is not trusted to say where to
+go.
+
+To change the scheme later, edit `plugins.deep-link.desktop.schemes` in
+`tauri.conf.json` — and expect links already sent to stop working.
+
 ### Refreshing when you come back
 
 Mobile shells reload when the app returns to the foreground, and data goes stale

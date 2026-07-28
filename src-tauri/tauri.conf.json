@@ -48,6 +48,11 @@
     }
   },
   "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["turbo-desktop"]
+      }
+    },
     "shell": {
       "open": true
     },

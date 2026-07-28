@@ -5,6 +5,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  bundleIdentifier,
+  urlScheme,
   defaultBuildTarget,
   defaultUserAgent,
   extractIconFlag,
@@ -14,6 +16,7 @@ import {
 } from "../cli/turbo-desktop.js";
 
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const read = (...parts) => readFileSync(join(PACKAGE_ROOT, ...parts), "utf-8");
 
 test("extractIconFlag returns the args untouched when --icon is absent", () => {
   const { iconPath, rest } = extractIconFlag(["myapp"]);
@@ -124,4 +127,39 @@ test("the scaffold copies every Rust module main.rs declares", () => {
       `cli scaffold is missing ${file}; the generated project would not compile`
     );
   }
+});
+
+test("each app gets its own URL scheme", () => {
+  assert.equal(urlScheme("Task Manager"), "task-manager");
+  assert.equal(urlScheme("rbenv Manager"), "rbenv-manager");
+  assert.equal(urlScheme("My  App!!"), "my-app");
+});
+
+test("a scheme always starts with a letter", () => {
+  // Schemes may not begin with a digit, and a name can.
+  assert.match(urlScheme("1Password Clone"), /^[a-z]/);
+  assert.equal(urlScheme("1Password Clone"), "app-1password-clone");
+});
+
+test("each app gets its own bundle identifier", () => {
+  assert.equal(bundleIdentifier("Task Manager"), "com.task-manager.app");
+  assert.notEqual(
+    bundleIdentifier("Task Manager"),
+    bundleIdentifier("Invoice Tracker"),
+    "two apps sharing an identifier would share their stored preferences"
+  );
+});
+
+test("the shell's own config does not leak its identity into scaffolds", () => {
+  const conf = JSON.parse(read("src-tauri", "tauri.conf.json"));
+  const cli = read("cli", "turbo-desktop.js");
+
+  // The scaffold must rewrite these rather than copying them.
+  for (const key of ["productName", "identifier"]) {
+    assert.ok(
+      cli.includes(`tauriConf.${key} =`),
+      `the scaffold should set ${key} rather than inherit "${conf[key]}"`
+    );
+  }
+  assert.ok(cli.includes('tauriConf.plugins["deep-link"]'));
 });
