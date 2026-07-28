@@ -20,7 +20,8 @@
     "active": true,
     "targets": "all",
     "resources": {
-      "../turbo-desktop.config.json": "turbo-desktop.config.json"
+      "../turbo-desktop.config.json": "turbo-desktop.config.json",
+      "../path-configuration.json": "path-configuration.json"
     },
     "icon": [
       "icons/32x32.png",

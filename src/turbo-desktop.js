@@ -615,6 +615,12 @@
       case "back":
         window.history.back();
         break;
+      case "forward":
+        window.history.forward();
+        break;
+      case "reload":
+        window.location.reload();
+        break;
       case "refresh":
         // Turbo's own refresh keeps scroll position and morphs where it can.
         if (window.Turbo && window.Turbo.visit) {

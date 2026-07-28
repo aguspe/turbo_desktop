@@ -100,6 +100,24 @@ Edit `turbo-desktop.config.json`:
 > `path_configuration_url` is optional — it defaults to
 > `{server_url}/turbo-desktop/path-configuration.json`.
 
+#### Where the rules come from
+
+The server is the source of truth, but it is not always reachable, so the shell
+starts with rules rather than none — the same layering Hotwire Native uses:
+
+1. **The last copy the server gave**, cached in the user's config directory.
+2. **The copy bundled with the app** (`path-configuration.json` beside your app
+   config), for a first run before the server has ever answered.
+3. Failing both, everything routes to the default presentation.
+
+The server's copy replaces whichever was loaded as soon as it arrives, and is
+cached for next time. A cold start with your server down therefore keeps the
+routing you had, instead of silently sending every route to the default and
+making modals appear to stop working.
+
+Keys the desktop shell does not use — Hotwire Native's `settings`, say — are
+ignored, so one endpoint can serve every shell.
+
 `server_url` is also the app's trust boundary: the bridge only answers calls from
 pages on that exact origin (scheme, host and port). A page from anywhere else —
 an off-site link, a redirect, an embedded frame — gets a refusal instead of
