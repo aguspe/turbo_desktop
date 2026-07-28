@@ -56,6 +56,33 @@ turbo_desktop_arch      # => "aarch64", "x86_64", or nil
     ) %>
 ```
 
+### Desktop-only templates
+
+Requests from the desktop app are marked with a Rails variant, so a whole
+template can be written for it rather than branching inside a shared one:
+
+```
+app/views/orders/show.html.erb           # everyone
+app/views/orders/show.html+desktop.erb   # the desktop app
+```
+
+Layouts work the same way — `app/views/layouts/application.html+desktop.erb`.
+Rails falls back to the plain template wherever no variant exists, so this costs
+nothing until you add one.
+
+The block helpers above are still the right tool for a button or a nav bar. Reach
+for a variant when the whole page differs.
+
+Rename it, or turn it off, in the initializer:
+
+```ruby
+TurboDesktop.configure do |config|
+  config.variant = :desktop   # nil leaves variants alone
+end
+```
+
+It is added to any variants you have already set rather than replacing them.
+
 ### Path Configuration
 
 The gem mounts a path configuration endpoint at `/turbo-desktop/path-configuration.json`:

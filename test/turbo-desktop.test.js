@@ -10,6 +10,9 @@ const scriptSource = readFileSync(
   resolve(__dirname, "../src/turbo-desktop.js"),
   "utf-8"
 );
+const { version: packageVersion } = JSON.parse(
+  readFileSync(resolve(__dirname, "../package.json"), "utf-8")
+);
 
 /**
  * Create a fresh JSDOM window and execute the turbo-desktop script in it.
@@ -80,7 +83,7 @@ describe("TurboDesktop initialization", () => {
 
   it("sets version, platform, and isNative", () => {
     const { window } = createEnvironment();
-    assert.strictEqual(window.TurboDesktop.version, "0.1.0");
+    assert.strictEqual(window.TurboDesktop.version, packageVersion);
     assert.strictEqual(window.TurboDesktop.platform, "macos");
     assert.strictEqual(window.TurboDesktop.isNative, true);
   });
@@ -459,5 +462,306 @@ describe("Title sync on initial load", () => {
     // No title call should have happened yet (DOMContentLoaded hasn't fired)
     const titleCall = calls.find((c) => c.cmd === "update_window_title");
     assert.strictEqual(titleCall, undefined);
+  });
+});
+
+describe("Connection and visit errors", () => {
+  const BANNER = "#turbo-desktop-offline-overlay";
+
+  it("exposes the same error names as Hotwire Native", () => {
+    const { window } = createEnvironment();
+
+    assertDeepEqual(window.TurboDesktop.errors, {
+      NETWORK_FAILURE: "network_failure",
+      TIMEOUT_FAILURE: "timeout_failure",
+      HTTP_FAILURE: "http_failure",
+      PAGE_LOAD_FAILURE: "page_load_failure",
+    });
+  });
+
+  it("shows a banner when a Turbo fetch fails", () => {
+    const { window } = createEnvironment();
+
+    window.document.dispatchEvent(
+      new window.CustomEvent("turbo:fetch-request-error", { detail: {} })
+    );
+
+    assert.ok(window.document.querySelector(BANNER), "expected the shell's banner");
+  });
+
+  it("announces failures as a cancelable event carrying a retry handler", () => {
+    const { window } = createEnvironment();
+    const seen = [];
+
+    window.document.addEventListener("turbo-desktop:visit-error", (event) => {
+      seen.push(event.detail);
+    });
+
+    window.document.dispatchEvent(
+      new window.CustomEvent("turbo:fetch-request-error", { detail: {} })
+    );
+
+    assert.strictEqual(seen.length, 1);
+    assert.strictEqual(seen[0].error, "network_failure");
+    assert.strictEqual(typeof seen[0].retry, "function");
+  });
+
+  it("lets a listener suppress the shell's banner with preventDefault", () => {
+    const { window } = createEnvironment();
+
+    window.document.addEventListener("turbo-desktop:visit-error", (event) =>
+      event.preventDefault()
+    );
+    window.document.dispatchEvent(
+      new window.CustomEvent("turbo:fetch-request-error", { detail: {} })
+    );
+
+    assert.strictEqual(
+      window.document.querySelector(BANNER),
+      null,
+      "the app took over presentation, so the shell should stay out of the way"
+    );
+  });
+
+  it("stays out of the way entirely when error handling is set to manual", () => {
+    const { window } = createEnvironment();
+    const meta = window.document.createElement("meta");
+    meta.name = "turbo-desktop-error-handling";
+    meta.content = "manual";
+    window.document.head.appendChild(meta);
+
+    window.document.dispatchEvent(
+      new window.CustomEvent("turbo:fetch-request-error", { detail: {} })
+    );
+
+    assert.strictEqual(window.document.querySelector(BANNER), null);
+  });
+
+  it("reports server errors with their status code", () => {
+    const { window } = createEnvironment();
+    const seen = [];
+
+    window.document.addEventListener("turbo-desktop:visit-error", (event) =>
+      seen.push(event.detail)
+    );
+
+    window.document.dispatchEvent(
+      new window.CustomEvent("turbo:before-fetch-response", {
+        detail: { fetchResponse: { succeeded: false, statusCode: 503 } },
+      })
+    );
+
+    assert.strictEqual(seen.length, 1);
+    assert.strictEqual(seen[0].error, "http_failure");
+    assert.strictEqual(seen[0].status, 503);
+  });
+
+  it("ignores responses the app is expected to handle itself", () => {
+    const { window } = createEnvironment();
+    const seen = [];
+
+    window.document.addEventListener("turbo-desktop:visit-error", (event) =>
+      seen.push(event.detail)
+    );
+
+    // A 404 or a failed form validation is the app's own page to render.
+    for (const statusCode of [404, 422]) {
+      window.document.dispatchEvent(
+        new window.CustomEvent("turbo:before-fetch-response", {
+          detail: { fetchResponse: { succeeded: false, statusCode } },
+        })
+      );
+    }
+
+    assert.deepStrictEqual(seen, []);
+  });
+
+  it("clears the banner when the machine comes back online", () => {
+    const { window } = createEnvironment();
+
+    window.dispatchEvent(new window.Event("offline"));
+    assert.ok(window.document.querySelector(BANNER));
+
+    window.dispatchEvent(new window.Event("online"));
+    assert.strictEqual(window.document.querySelector(BANNER), null);
+  });
+});
+
+describe("Modal dismissal", () => {
+  it("knows the window it is in", () => {
+    const { window } = createEnvironment();
+    window.__TURBO_DESKTOP_WINDOW_LABEL__ = "modal-abc123";
+
+    assert.strictEqual(window.TurboDesktop.windowLabel, "modal-abc123");
+    assert.strictEqual(window.TurboDesktop.isModal, true);
+  });
+
+  it("does not think the main window is a modal", () => {
+    const { window } = createEnvironment();
+    window.__TURBO_DESKTOP_WINDOW_LABEL__ = "main";
+
+    assert.strictEqual(window.TurboDesktop.isModal, false);
+  });
+
+  it("closes the window it is in when given no label", async () => {
+    const { window, calls } = createEnvironment({ invoke: async () => {} });
+    window.__TURBO_DESKTOP_WINDOW_LABEL__ = "modal-abc123";
+    await tick();
+
+    await window.TurboDesktop.closeModal();
+
+    const call = calls.find((c) => c.cmd === "close_modal");
+    assert.ok(call, "expected a close_modal call");
+    assert.strictEqual(call.args.label, "modal-abc123");
+  });
+
+  it("uses Hotwire Native's dismissal names", async () => {
+    for (const [method, then] of [
+      ["recede", "recede"],
+      ["refresh", "refresh"],
+      ["resume", "resume"],
+    ]) {
+      const { window, calls } = createEnvironment({ invoke: async () => {} });
+      await tick();
+
+      await window.TurboDesktop[method]();
+
+      const call = calls.find((c) => c.cmd === "dismiss_modal");
+      assert.ok(call, `expected ${method}() to dismiss`);
+      assert.strictEqual(call.args.then, then);
+    }
+  });
+});
+
+describe("Messages from the shell", () => {
+  it("refreshes the page when told to", () => {
+    const { window } = createEnvironment();
+    const visits = [];
+    window.Turbo = { visit: (url, opts) => visits.push({ url, opts }) };
+
+    window.TurboDesktop.__receive("navigate", { action: "refresh" });
+
+    assert.strictEqual(visits.length, 1);
+    assert.strictEqual(visits[0].opts.action, "replace");
+  });
+
+  it("leaves the page alone when told to resume", () => {
+    const { window } = createEnvironment();
+    const visits = [];
+    window.Turbo = { visit: (url, opts) => visits.push({ url, opts }) };
+
+    window.TurboDesktop.__receive("navigate", { action: "none" });
+
+    assert.deepStrictEqual(visits, []);
+  });
+
+  it("shows the banner when the shell reports a lost connection", () => {
+    const { window } = createEnvironment();
+
+    window.TurboDesktop.__receive("connection", {
+      online: false,
+      error: "network_failure",
+    });
+
+    assert.ok(window.document.querySelector("#turbo-desktop-offline-overlay"));
+  });
+
+  it("clears the banner when the shell reports reconnection", () => {
+    const { window } = createEnvironment();
+
+    window.TurboDesktop.__receive("connection", { online: false });
+    window.TurboDesktop.__receive("connection", { online: true });
+
+    assert.strictEqual(
+      window.document.querySelector("#turbo-desktop-offline-overlay"),
+      null
+    );
+  });
+
+  it("ignores messages it does not understand", () => {
+    const { window } = createEnvironment();
+
+    // Must not throw — the shell may be newer than the injected script.
+    window.TurboDesktop.__receive("something-new", { a: 1 });
+  });
+});
+
+describe("Returning to the window", () => {
+  function focusReturn(window, detail) {
+    window.TurboDesktop.__receive("focus", detail);
+  }
+
+  it("refreshes when the shell says the absence was long enough", () => {
+    const { window } = createEnvironment();
+    const visits = [];
+    window.Turbo = { visit: (url, opts) => visits.push({ url, opts }) };
+
+    focusReturn(window, { awaySeconds: 120, refreshing: true });
+
+    assert.strictEqual(visits.length, 1);
+    assert.strictEqual(visits[0].opts.action, "replace");
+  });
+
+  it("does nothing when the absence was short", () => {
+    const { window } = createEnvironment();
+    const visits = [];
+    window.Turbo = { visit: (url, opts) => visits.push({ url, opts }) };
+
+    focusReturn(window, { awaySeconds: 3, refreshing: false });
+
+    assert.deepStrictEqual(visits, []);
+  });
+
+  it("announces the return either way", () => {
+    const { window } = createEnvironment();
+    const seen = [];
+    window.document.addEventListener("turbo-desktop:focus", (e) => seen.push(e.detail));
+
+    focusReturn(window, { awaySeconds: 3, refreshing: false });
+    focusReturn(window, { awaySeconds: 300, refreshing: true });
+
+    assert.strictEqual(seen.length, 2);
+    assert.strictEqual(seen[0].awaySeconds, 3);
+    assert.strictEqual(seen[1].refreshing, true);
+  });
+
+  it("lets the app veto the refresh", () => {
+    const { window } = createEnvironment();
+    const visits = [];
+    window.Turbo = { visit: (url, opts) => visits.push({ url, opts }) };
+    window.document.addEventListener("turbo-desktop:focus", (e) => e.preventDefault());
+
+    focusReturn(window, { awaySeconds: 300, refreshing: true });
+
+    assert.deepStrictEqual(visits, [], "the app knows about state we cannot see");
+  });
+
+  it("does not throw away what someone is typing", () => {
+    const { window } = createEnvironment();
+    const visits = [];
+    window.Turbo = { visit: (url, opts) => visits.push({ url, opts }) };
+
+    const input = window.document.createElement("input");
+    window.document.body.appendChild(input);
+    input.focus();
+
+    focusReturn(window, { awaySeconds: 3600, refreshing: true });
+
+    assert.deepStrictEqual(visits, [], "a half-filled form outranks stale data");
+  });
+
+  it("refreshes once the field is no longer focused", () => {
+    const { window } = createEnvironment();
+    const visits = [];
+    window.Turbo = { visit: (url, opts) => visits.push({ url, opts }) };
+
+    const input = window.document.createElement("input");
+    window.document.body.appendChild(input);
+    input.focus();
+    input.blur();
+
+    focusReturn(window, { awaySeconds: 3600, refreshing: true });
+
+    assert.strictEqual(visits.length, 1);
   });
 });

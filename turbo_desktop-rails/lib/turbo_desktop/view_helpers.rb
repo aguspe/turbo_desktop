@@ -26,12 +26,20 @@ module TurboDesktop
       end
     end
 
+    # Attribute name fragments we are willing to build a data-* attribute from.
+    # Values are escaped by the tag helpers, but names are interpolated, so they
+    # are restricted rather than escaped.
+    BRIDGE_NAME_PATTERN = /\A[a-zA-Z0-9_-]+\z/
+
     # Renders a bridge component data attribute.
     #
     #   <%= tag.button "Export", **turbo_desktop_bridge("menu-item", title: "Export PDF", shortcut: "Cmd+E") %>
     def turbo_desktop_bridge(component, **options)
-      attrs = { "data-turbo-desktop-bridge" => component }
+      validate_bridge_name!(component, "component")
+
+      attrs = { "data-turbo-desktop-bridge" => component.to_s }
       options.each do |key, value|
+        validate_bridge_name!(key, "option name")
         attrs["data-turbo-desktop-bridge-#{key}"] = value.to_s
       end
       attrs
@@ -72,6 +80,16 @@ module TurboDesktop
     # path (configurable via config.inspector_mount_path).
     def turbo_desktop_inspector_url
       "#{TurboDesktop.configuration.inspector_mount_path.chomp("/")}/inspector.js"
+    end
+
+    private
+
+    def validate_bridge_name!(name, label)
+      return if name.to_s.match?(BRIDGE_NAME_PATTERN)
+
+      raise ArgumentError,
+            "turbo_desktop_bridge #{label} #{name.inspect} may only contain " \
+            "letters, numbers, hyphens and underscores"
     end
   end
 end

@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Can't reach the server</title>
+    <!--
+      This page is shown when the shell cannot reach your app: at launch, or when
+      the connection drops and the web layer cannot present the failure itself.
+
+      It is yours to change — edit it in your project and it will be bundled with
+      your app. Two constraints:
+
+        1. It has to work with no network. Everything it needs must be inline:
+           no CDN fonts, no remote stylesheets, no server-hosted images.
+        2. Keep the retry behaviour, or replace it with your own. Without it the
+           window has no way back once the server returns.
+
+      The shell hands it two things:
+        window.__TURBO_DESKTOP_SERVER_URL__  where to return to
+        ?error=<slug>                        why it is being shown
+                                             (network_failure, timeout_failure,
+                                              http_failure, page_load_failure)
+    -->
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+        background: #1a1a2e;
+        color: #e0e0e0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        -webkit-user-select: none;
+      }
+      .container { text-align: center; max-width: 460px; padding: 2rem; }
+      .spinner {
+        width: 40px;
+        height: 40px;
+        border: 3px solid #2a2a4a;
+        border-top-color: #e73c7e;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin: 0 auto 1.5rem;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      h1 {
+        font-size: 1.6rem;
+        font-weight: 700;
+        margin-bottom: 0.6rem;
+        background: linear-gradient(135deg, #e73c7e, #ee7752);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+      }
+      p { color: #9a9ab0; font-size: 0.95rem; line-height: 1.6; }
+      code {
+        background: #2a2a4a;
+        padding: 0.15em 0.5em;
+        border-radius: 4px;
+        font-size: 0.9em;
+        color: #e73c7e;
+      }
+      button {
+        background: linear-gradient(135deg, #e73c7e, #ee7752);
+        color: #fff;
+        border: none;
+        padding: 0.6rem 1.6rem;
+        border-radius: 8px;
+        font-size: 0.9rem;
+        font-weight: 600;
+        cursor: pointer;
+        margin-top: 1.5rem;
+      }
+      button:hover { opacity: 0.85; }
+      button:disabled { opacity: 0.5; cursor: default; }
+      .status { font-size: 0.8rem; color: #6a6a80; margin-top: 1rem; }
+      .status.connected { color: #7ee787; }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="spinner"></div>
+      <h1 id="title">Can't reach the server</h1>
+      <p id="detail"></p>
+      <button id="retry">Retry now</button>
+      <p class="status" id="status">Retrying automatically…</p>
+    </div>
+
+    <script>
+      (function () {
+        const SERVER_URL = window.__TURBO_DESKTOP_SERVER_URL__ || "http://localhost:3000";
+        const RETRY_INTERVAL = 3000;
+
+        const params = new URLSearchParams(window.location.search);
+        const error = params.get("error") || "network_failure";
+        const status = Number(params.get("status")) || null;
+
+        // Same error names the mobile Hotwire Native shells use.
+        const MESSAGES = {
+          network_failure: {
+            title: "Can't reach the server",
+            detail: `Nothing is answering at <code>${SERVER_URL}</code>. If you are developing, check that your Rails server is running.`,
+          },
+          timeout_failure: {
+            title: "The server is taking too long",
+            detail: `<code>${SERVER_URL}</code> accepted the connection but did not respond in time.`,
+          },
+          http_failure: {
+            title: "The server returned an error",
+            detail: `<code>${SERVER_URL}</code> responded with status ${status || "an error"}.`,
+          },
+          page_load_failure: {
+            title: "The page didn't load",
+            detail: "Something went wrong loading the page.",
+          },
+        };
+
+        const message = MESSAGES[error] || MESSAGES.network_failure;
+        document.getElementById("title").textContent = message.title;
+        document.getElementById("detail").innerHTML = message.detail;
+
+        const statusEl = document.getElementById("status");
+        const retryButton = document.getElementById("retry");
+
+        // The shell watches the server and sends this window back on its own as
+        // soon as it answers, so this page does not poll. It cannot: bundled
+        // pages run under a content security policy that does not let them reach
+        // the server, and asking the shell keeps one watcher instead of two.
+        async function retryNow() {
+          const invoke = window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke;
+          if (!invoke) return false;
+
+          try {
+            return await invoke("retry_connection", {});
+          } catch (e) {
+            console.warn("[turbo-desktop] Retry failed:", e);
+            return false;
+          }
+        }
+
+        retryButton.addEventListener("click", async () => {
+          retryButton.disabled = true;
+          statusEl.textContent = "Checking…";
+
+          const reachable = await retryNow();
+          if (reachable) {
+            statusEl.textContent = "Server is back — reconnecting…";
+            statusEl.className = "status connected";
+            return;
+          }
+
+          statusEl.textContent = "Still no answer — retrying automatically…";
+          retryButton.disabled = false;
+        });
+
+        // A nudge on a slower cadence than the shell's own probe, so a stalled
+        // watcher still recovers.
+        setInterval(retryNow, RETRY_INTERVAL * 4);
+      })();
+    </script>
+  </body>
+</html>

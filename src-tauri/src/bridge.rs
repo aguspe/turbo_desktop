@@ -35,12 +35,17 @@ pub struct BridgeResponse {
     pub data: serde_json::Value,
 }
 
+use crate::security::ensure_trusted_caller;
+
 /// Handle an incoming bridge message from a web component.
 #[tauri::command]
 pub async fn handle_bridge_message(
     app: tauri::AppHandle,
+    webview: tauri::Webview,
     message: BridgeMessage,
 ) -> Result<serde_json::Value, String> {
+    ensure_trusted_caller(&app, &webview)?;
+
     log::info!(
         "Bridge message: component={}, event={}",
         message.component,
@@ -70,8 +75,11 @@ pub async fn handle_bridge_message(
 #[tauri::command]
 pub async fn send_bridge_response(
     app: tauri::AppHandle,
+    webview: tauri::Webview,
     response: BridgeResponse,
 ) -> Result<(), String> {
+    ensure_trusted_caller(&app, &webview)?;
+
     // Emit to all windows — the JS side filters by component
     app.emit("bridge-response", &response)
         .map_err(|e| format!("{}", e))?;
@@ -104,7 +112,6 @@ async fn handle_menu_item(
     match message.event.as_str() {
         "connect" => {
             let title = message.data["title"].as_str().unwrap_or("Menu Item");
-            let _shortcut = message.data["shortcut"].as_str();
 
             log::info!("Bridge: registering menu item '{}'", title);
 

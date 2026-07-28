@@ -11,6 +11,23 @@ module TurboDesktop
 
     included do
       helper_method :turbo_desktop_app?, :turbo_desktop_platform, :turbo_desktop_arch
+
+      before_action :set_turbo_desktop_variant
+    end
+
+    # The variant list a request should end up with, or nil to leave it alone.
+    #
+    # Kept separate from the controller so the decision can be exercised on its
+    # own. Adds to whatever variants are already set rather than replacing them:
+    # an app may well be using variants for something else.
+    def self.variant_for(current:, desktop:, configured:)
+      return nil if configured.blank? || !desktop
+
+      current = Array(current).map(&:to_sym)
+      configured = configured.to_sym
+      return nil if current.include?(configured)
+
+      current + [ configured ]
     end
 
     # Returns true if the request is from a Turbo Desktop app.
@@ -29,6 +46,27 @@ module TurboDesktop
       when /Linux/i then "linux"
       else nil
       end
+    end
+
+    # Mark desktop requests with a Rails variant, so a whole template can be
+    # written for the desktop app instead of branching inside a shared one:
+    #
+    #   app/views/orders/show.html.erb           # everyone
+    #   app/views/orders/show.html+desktop.erb   # the desktop app
+    #
+    # Layouts pick it up too — layouts/application.html+desktop.erb. Rails falls
+    # back to the plain template wherever no variant exists, so this costs
+    # nothing until you add one.
+    #
+    # Set config.variant to nil to turn it off.
+    def set_turbo_desktop_variant
+      variant = TurboDesktop::Detection.variant_for(
+        current: request.variant,
+        desktop: turbo_desktop_app?,
+        configured: TurboDesktop.configuration.variant
+      )
+
+      request.variant = variant if variant
     end
 
     # Returns the architecture: "aarch64", "x86_64", or nil.

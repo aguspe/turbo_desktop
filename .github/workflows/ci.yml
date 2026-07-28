@@ -50,6 +50,7 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - run: npm run lint
       - run: npm test
 
   rust:
@@ -70,3 +71,6 @@ jobs:
       - name: Cargo check
         working-directory: src-tauri
         run: cargo check
+      - name: Cargo test
+        working-directory: src-tauri
+        run: cargo test
