@@ -1,5 +1,8 @@
 use crate::bridge::{BridgeMessage, BridgeResponse};
-use tauri::Emitter;
+use crate::security;
+use crate::window::TurboDesktopConfig;
+use tauri::{Emitter, Manager};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use std::process::Stdio;
 
@@ -7,6 +10,11 @@ use std::process::Stdio;
 ///
 /// Executes commands with administrator privileges on macOS using
 /// `osascript` to prompt for the user's password via the system dialog.
+///
+/// The bridge is disabled unless `turbo-desktop.config.json` enables it and
+/// lists the permitted commands. The macOS password prompt never shows what is
+/// about to run — and caches the credential afterwards — so an app-level
+/// confirmation naming the command runs first unless it is turned off.
 ///
 /// Events:
 ///   - "execute": Run a command with admin privileges (blocking, returns output)
@@ -16,18 +24,68 @@ pub async fn handle_sudo(
     message: &BridgeMessage,
 ) -> Result<serde_json::Value, String> {
     match message.event.as_str() {
-        "execute" => handle_execute(message).await,
+        "execute" => handle_execute(app, message).await,
         "spawn" => handle_spawn(app, message).await,
         _ => Ok(serde_json::json!({ "status": "unknown_event" })),
     }
 }
 
+/// Check the command against the configured policy, then ask the user to confirm it.
+///
+/// `Ok(false)` means the user declined; the caller reports that as a cancellation.
+async fn authorize(app: &tauri::AppHandle, command: &str) -> Result<bool, String> {
+    let config = app.state::<TurboDesktopConfig>();
+    security::authorize_sudo_command(&config.sudo, command).inspect_err(|e| {
+        log::warn!("Sudo: {}", e);
+    })?;
+
+    if !config.sudo.confirm {
+        return Ok(true);
+    }
+
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .message(format!(
+            "{} wants to run this command as administrator:\n\n{}",
+            config.app_name, command
+        ))
+        .kind(MessageDialogKind::Warning)
+        .title("Administrator privileges requested")
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "Run".to_string(),
+            "Cancel".to_string(),
+        ))
+        .show(move |confirmed| {
+            let _ = tx.send(confirmed);
+        });
+
+    rx.await
+        .map_err(|e| format!("Sudo confirmation dialog failed: {}", e))
+}
+
+/// Response returned when the user declines the confirmation dialog.
+fn cancelled() -> serde_json::Value {
+    serde_json::json!({
+        "status": "cancelled",
+        "stdout": "",
+        "stderr": "",
+        "code": -128,
+    })
+}
+
 /// Execute a command with admin privileges and return the full output.
 /// Uses macOS `osascript` to prompt for password.
-async fn handle_execute(message: &BridgeMessage) -> Result<serde_json::Value, String> {
+async fn handle_execute(
+    app: &tauri::AppHandle,
+    message: &BridgeMessage,
+) -> Result<serde_json::Value, String> {
     let command = message.data["command"]
         .as_str()
         .ok_or("Missing 'command' in sudo execute")?;
+
+    if !authorize(app, command).await? {
+        return Ok(cancelled());
+    }
 
     let script = build_osascript_command(command);
 
@@ -74,6 +132,10 @@ async fn handle_spawn(
         .as_str()
         .ok_or("Missing 'command' in sudo spawn")?
         .to_string();
+
+    if !authorize(app, &command).await? {
+        return Ok(serde_json::json!({ "status": "cancelled", "id": id }));
+    }
 
     let script = build_osascript_command(&command);
 

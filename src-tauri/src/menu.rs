@@ -24,7 +24,15 @@ pub fn build_menu<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<Menu<R>, taur
                 .show_all()
                 .separator();
         }
-        builder.quit().build()?
+        // A custom Quit rather than the predefined one: that maps to Cocoa's
+        // `terminate:`, which ends the process without Tauri ever raising an exit
+        // event, so child processes are never reaped and window preferences are
+        // never written. This routes through AppHandle::exit instead.
+        let quit = MenuItemBuilder::with_id("quit", "Quit")
+            .accelerator("CmdOrCtrl+Q")
+            .build(app)?;
+
+        builder.item(&quit).build()?
     };
 
     let file_menu = SubmenuBuilder::new(app, "File")
@@ -103,30 +111,38 @@ pub fn build_menu<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<Menu<R>, taur
     Ok(menu)
 }
 
+/// Ask the main window's page to move.
+fn navigate_main<R: Runtime>(app: &tauri::AppHandle<R>, action: &str) {
+    if let Some(window) = app.get_webview_window("main") {
+        crate::window::deliver_to_page(
+            &window,
+            "navigate",
+            &serde_json::json!({ "action": action }),
+        );
+    }
+}
+
 /// Handle menu item clicks.
 /// Called from the main event loop when a menu event fires.
-pub fn handle_menu_event(app: &tauri::AppHandle, event_id: &str) {
+pub fn handle_menu_event<R: Runtime>(app: &tauri::AppHandle<R>, event_id: &str) {
+    log::debug!("Menu event: {}", event_id);
+
     match event_id {
-        "reload" => {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.eval("window.location.reload()");
-            }
+        "quit" => {
+            // Goes through Tauri's shutdown so the exit handler runs.
+            app.exit(0);
         }
+        // Navigation goes through the injected script rather than evaluating
+        // statements at it, so the menu, modal dismissal and anything else that
+        // moves the page share one path.
+        "reload" => navigate_main(app, "reload"),
         "devtools" => {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.eval("window.__TURBO_DESKTOP__.toggleDevTools()");
             }
         }
-        "nav-back" => {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.eval("window.history.back()");
-            }
-        }
-        "nav-forward" => {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.eval("window.history.forward()");
-            }
-        }
+        "nav-back" => navigate_main(app, "back"),
+        "nav-forward" => navigate_main(app, "forward"),
         "actual-size" => {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.eval("document.body.style.zoom = '100%'");

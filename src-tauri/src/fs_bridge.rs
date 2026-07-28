@@ -1,45 +1,60 @@
 use crate::bridge::BridgeMessage;
+use crate::security;
+use crate::window::TurboDesktopConfig;
+use std::path::PathBuf;
+use tauri::Manager;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 
 /// Handle bridge messages for the "filesystem" component.
 ///
-/// Provides read, write, exists, list, mkdir, and remove operations
-/// with support for tilde (~/) expansion to the user's home directory.
+/// Provides read, write, exists, list, mkdir, and remove operations.
+/// Every path is resolved against the roots declared in
+/// `turbo-desktop.config.json`; anything outside them is refused.
 pub async fn handle_filesystem(
-    _app: &tauri::AppHandle,
+    app: &tauri::AppHandle,
     message: &BridgeMessage,
 ) -> Result<serde_json::Value, String> {
+    let roots = configured_roots(app);
+
     match message.event.as_str() {
-        "read" => handle_read(message).await,
-        "write" => handle_write(message).await,
-        "exists" => handle_exists(message).await,
-        "list" => handle_list(message).await,
-        "mkdir" => handle_mkdir(message).await,
-        "remove" => handle_remove(message).await,
+        "read" => handle_read(message, &roots).await,
+        "write" => handle_write(message, &roots).await,
+        "exists" => handle_exists(message, &roots).await,
+        "list" => handle_list(message, &roots).await,
+        "mkdir" => handle_mkdir(message, &roots).await,
+        "remove" => handle_remove(message, &roots).await,
         _ => Ok(serde_json::json!({ "status": "unknown_event" })),
     }
 }
 
-/// Expand ~/... to $HOME/...
-fn expand_path(path: &str) -> String {
-    if path.starts_with("~/") {
-        if let Ok(home) = std::env::var("HOME") {
-            return format!("{}{}", home, &path[1..]);
-        }
-    } else if path == "~" {
-        if let Ok(home) = std::env::var("HOME") {
-            return home;
-        }
-    }
-    path.to_string()
+/// Roots this app may touch, defaulting to its own data directory.
+fn configured_roots(app: &tauri::AppHandle) -> Vec<PathBuf> {
+    let config = app.state::<TurboDesktopConfig>();
+    let app_data_dir = app.path().app_data_dir().ok();
+    security::allowed_roots(app_data_dir, &config.filesystem)
 }
 
-async fn handle_read(message: &BridgeMessage) -> Result<serde_json::Value, String> {
-    let path = message.data["path"]
+/// Pull the `path` field out of a message and resolve it inside the allowed roots.
+fn scoped_path(
+    message: &BridgeMessage,
+    roots: &[PathBuf],
+    event: &str,
+) -> Result<PathBuf, String> {
+    let raw = message.data["path"]
         .as_str()
-        .ok_or("Missing 'path' in filesystem read")?;
-    let path = expand_path(path);
+        .ok_or_else(|| format!("Missing 'path' in filesystem {}", event))?;
+
+    security::resolve_in_scope(raw, roots).inspect_err(|e| {
+        log::warn!("Filesystem: {}", e);
+    })
+}
+
+async fn handle_read(
+    message: &BridgeMessage,
+    roots: &[PathBuf],
+) -> Result<serde_json::Value, String> {
+    let path = scoped_path(message, roots, "read")?;
 
     match fs::read_to_string(&path).await {
         Ok(content) => Ok(serde_json::json!({ "status": "ok", "content": content })),
@@ -47,15 +62,15 @@ async fn handle_read(message: &BridgeMessage) -> Result<serde_json::Value, Strin
     }
 }
 
-async fn handle_write(message: &BridgeMessage) -> Result<serde_json::Value, String> {
-    let path = message.data["path"]
-        .as_str()
-        .ok_or("Missing 'path' in filesystem write")?;
+async fn handle_write(
+    message: &BridgeMessage,
+    roots: &[PathBuf],
+) -> Result<serde_json::Value, String> {
     let content = message.data["content"]
         .as_str()
         .ok_or("Missing 'content' in filesystem write")?;
     let append = message.data["append"].as_bool().unwrap_or(false);
-    let path = expand_path(path);
+    let path = scoped_path(message, roots, "write")?;
 
     let result = if append {
         let mut file = fs::OpenOptions::new()
@@ -75,11 +90,11 @@ async fn handle_write(message: &BridgeMessage) -> Result<serde_json::Value, Stri
     }
 }
 
-async fn handle_exists(message: &BridgeMessage) -> Result<serde_json::Value, String> {
-    let path = message.data["path"]
-        .as_str()
-        .ok_or("Missing 'path' in filesystem exists")?;
-    let path = expand_path(path);
+async fn handle_exists(
+    message: &BridgeMessage,
+    roots: &[PathBuf],
+) -> Result<serde_json::Value, String> {
+    let path = scoped_path(message, roots, "exists")?;
 
     match fs::metadata(&path).await {
         Ok(meta) => Ok(serde_json::json!({
@@ -97,11 +112,11 @@ async fn handle_exists(message: &BridgeMessage) -> Result<serde_json::Value, Str
     }
 }
 
-async fn handle_list(message: &BridgeMessage) -> Result<serde_json::Value, String> {
-    let path = message.data["path"]
-        .as_str()
-        .ok_or("Missing 'path' in filesystem list")?;
-    let path = expand_path(path);
+async fn handle_list(
+    message: &BridgeMessage,
+    roots: &[PathBuf],
+) -> Result<serde_json::Value, String> {
+    let path = scoped_path(message, roots, "list")?;
 
     let mut entries = Vec::new();
     let mut dir = match fs::read_dir(&path).await {
@@ -126,11 +141,11 @@ async fn handle_list(message: &BridgeMessage) -> Result<serde_json::Value, Strin
     Ok(serde_json::json!({ "status": "ok", "entries": entries }))
 }
 
-async fn handle_mkdir(message: &BridgeMessage) -> Result<serde_json::Value, String> {
-    let path = message.data["path"]
-        .as_str()
-        .ok_or("Missing 'path' in filesystem mkdir")?;
-    let path = expand_path(path);
+async fn handle_mkdir(
+    message: &BridgeMessage,
+    roots: &[PathBuf],
+) -> Result<serde_json::Value, String> {
+    let path = scoped_path(message, roots, "mkdir")?;
 
     match fs::create_dir_all(&path).await {
         Ok(()) => Ok(serde_json::json!({ "status": "ok" })),
@@ -138,12 +153,12 @@ async fn handle_mkdir(message: &BridgeMessage) -> Result<serde_json::Value, Stri
     }
 }
 
-async fn handle_remove(message: &BridgeMessage) -> Result<serde_json::Value, String> {
-    let path = message.data["path"]
-        .as_str()
-        .ok_or("Missing 'path' in filesystem remove")?;
+async fn handle_remove(
+    message: &BridgeMessage,
+    roots: &[PathBuf],
+) -> Result<serde_json::Value, String> {
     let recursive = message.data["recursive"].as_bool().unwrap_or(false);
-    let path = expand_path(path);
+    let path = scoped_path(message, roots, "remove")?;
 
     let result = match fs::metadata(&path).await {
         Ok(meta) if meta.is_dir() && recursive => fs::remove_dir_all(&path).await,

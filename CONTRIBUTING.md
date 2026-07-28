@@ -12,6 +12,21 @@ tests, and features.
   labelled `good first issue`.
 - **Improve docs** — the README and the docs site (`docs/`) are always improvable.
 
+## Adding a command
+
+A `#[tauri::command]` needs three things, not one. Register it in
+`generate_handler!`, add it to `APP_COMMANDS` in `src-tauri/build.rs`, and grant
+the generated `allow-<command>` permission in
+`src-tauri/capabilities/main.json`.
+
+Miss either of the last two and the command works from bundled pages but is
+refused for anything loaded from your server — with `not allowed. Plugin not
+found`, visible only in the webview console. `test/acl.test.js` checks all three
+stay in step.
+
+New commands should also call `security::ensure_trusted_caller` before doing
+anything, so only your app's own origin can reach them.
+
 ## Project layout
 
 Turbo Desktop is three pieces in one repo:

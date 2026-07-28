@@ -17,6 +17,17 @@ TurboDesktop.configure do |config|
   # presentation. Enable it in development only:
   config.inspector_enabled = Rails.env.development?
 
+  # Requests from the desktop app are marked with a Rails variant, so you can
+  # write a whole template for it instead of branching inside a shared one:
+  #
+  #   app/views/orders/show.html.erb           # everyone
+  #   app/views/orders/show.html+desktop.erb   # the desktop app
+  #
+  # Layouts work the same way (layouts/application.html+desktop.erb), and Rails
+  # falls back to the plain template wherever no variant exists. Rename it, or
+  # set it to nil to leave variants alone.
+  # config.variant = :desktop
+
   config.path_configuration = {
     settings: {
       screenshots_enabled: false

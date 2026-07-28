@@ -118,6 +118,23 @@ class ViewHelpersTest < Minitest::Test
     assert_equal "true", result["data-turbo-desktop-bridge-enabled"]
   end
 
+  def test_bridge_rejects_option_names_that_could_break_out_of_the_attribute
+    host = ViewHelpersTestHost.new(DESKTOP_UA)
+
+    error = assert_raises(ArgumentError) do
+      host.turbo_desktop_bridge("menu-item", 'title" onclick="alert(1)' => "x")
+    end
+    assert_match(/option name/, error.message)
+  end
+
+  def test_bridge_rejects_component_names_that_could_break_out_of_the_attribute
+    host = ViewHelpersTestHost.new(DESKTOP_UA)
+
+    assert_raises(ArgumentError) do
+      host.turbo_desktop_bridge('menu" onclick="alert(1)')
+    end
+  end
+
   def test_bridge_works_regardless_of_user_agent
     # Bridge helper does not depend on whether it is a desktop app
     host = ViewHelpersTestHost.new(BROWSER_UA)

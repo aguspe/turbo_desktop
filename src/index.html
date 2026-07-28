@@ -2,148 +2,17 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Turbo Desktop</title>
-    <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      body {
-        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
-        background: #1a1a2e;
-        color: #e0e0e0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        height: 100vh;
-        -webkit-user-select: none;
-      }
-      .container {
-        text-align: center;
-        max-width: 500px;
-        padding: 2rem;
-      }
-      h1 {
-        font-size: 2rem;
-        font-weight: 700;
-        margin-bottom: 0.5rem;
-        background: linear-gradient(135deg, #e73c7e, #ee7752);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-      }
-      .subtitle {
-        color: #888;
-        font-size: 0.95rem;
-        margin-bottom: 2rem;
-      }
-      .status {
-        background: #16213e;
-        border-radius: 12px;
-        padding: 1.5rem;
-        margin-bottom: 1.5rem;
-        border: 1px solid #2a2a4a;
-      }
-      .status h2 {
-        font-size: 0.85rem;
-        text-transform: uppercase;
-        letter-spacing: 0.1em;
-        color: #666;
-        margin-bottom: 0.75rem;
-      }
-      .status p {
-        font-size: 1rem;
-        line-height: 1.6;
-      }
-      code {
-        background: #2a2a4a;
-        padding: 0.15em 0.5em;
-        border-radius: 4px;
-        font-size: 0.9em;
-        color: #e73c7e;
-      }
-      .spinner {
-        width: 40px;
-        height: 40px;
-        border: 3px solid #2a2a4a;
-        border-top-color: #e73c7e;
-        border-radius: 50%;
-        animation: spin 1s linear infinite;
-        margin: 0 auto 1rem;
-      }
-      @keyframes spin { to { transform: rotate(360deg); } }
-      .retry-status {
-        font-size: 0.8rem;
-        color: #666;
-        margin-top: 1rem;
-      }
-      .retry-status.connected {
-        color: #7ee787;
-      }
-      button {
-        background: linear-gradient(135deg, #e73c7e, #ee7752);
-        color: #fff;
-        border: none;
-        padding: 0.6rem 1.5rem;
-        border-radius: 8px;
-        font-size: 0.9rem;
-        font-weight: 600;
-        cursor: pointer;
-        margin-top: 1rem;
-        transition: opacity 0.2s;
-      }
-      button:hover { opacity: 0.85; }
-      button:disabled { opacity: 0.5; cursor: default; }
-    </style>
   </head>
   <body>
-    <div class="container">
-      <div class="spinner"></div>
-      <h1>Turbo Desktop</h1>
-      <p class="subtitle">Connecting to your Rails server...</p>
-      <div class="status">
-        <h2>Configuration</h2>
-        <p>
-          If you see this screen, the app couldn't connect to your Rails server.<br>
-          Make sure your server is running at the URL specified in<br>
-          <code>turbo-desktop.config.json</code>
-        </p>
-      </div>
-      <div class="status">
-        <h2>Quick Start</h2>
-        <p>
-          <code>rails server</code> &mdash; the app will connect automatically
-        </p>
-      </div>
-      <button id="retryBtn" onclick="retryNow()">Retry Now</button>
-      <p class="retry-status" id="retryStatus">Retrying automatically every 3 seconds...</p>
-    </div>
+    <!--
+      The shell opens the main window straight at your app, or at error.html when
+      it cannot be reached, so this page is not normally shown. It exists because
+      Tauri expects an entry point in the frontend directory, and it forwards to
+      the error page so that landing here is never a dead end.
+    -->
     <script>
-      // Auto-retry: ping the server and redirect when it's available
-      const SERVER_URL = window.__TURBO_DESKTOP_SERVER_URL__ || "http://localhost:3000";
-      let retryInterval;
-
-      async function checkServer() {
-        try {
-          const resp = await fetch(SERVER_URL, { method: "HEAD", mode: "no-cors" });
-          // If fetch doesn't throw, the server is reachable
-          clearInterval(retryInterval);
-          const status = document.getElementById("retryStatus");
-          status.textContent = "Server detected! Redirecting...";
-          status.className = "retry-status connected";
-          document.getElementById("retryBtn").disabled = true;
-          window.location.replace(SERVER_URL);
-        } catch {
-          // Server still unreachable
-        }
-      }
-
-      function retryNow() {
-        document.getElementById("retryStatus").textContent = "Checking...";
-        checkServer();
-      }
-
-      retryInterval = setInterval(checkServer, 3000);
-      // Also try immediately
-      checkServer();
+      window.location.replace("error.html");
     </script>
-    <script src="turbo-desktop.js"></script>
   </body>
 </html>
