@@ -11,7 +11,7 @@
  */
 
 import { execSync, spawn, spawnSync } from "child_process";
-import { existsSync, mkdirSync, writeFileSync, copyFileSync, readFileSync, appendFileSync } from "fs";
+import { existsSync, mkdirSync, writeFileSync, copyFileSync, readFileSync, appendFileSync, realpathSync } from "fs";
 import { resolve, dirname, join, basename } from "path";
 import { fileURLToPath } from "url";
 
@@ -28,7 +28,21 @@ const COMMANDS = {
 
 // Only dispatch when run as a program. Importing this file (from the tests, say)
 // should expose the helpers without scaffolding anything.
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+//
+// Compared through realpath because npm installs the bin as a symlink, so when
+// this runs as `npx turbo-desktop` argv[1] is the link and import.meta.url is
+// its target. Comparing them directly makes the CLI silently do nothing.
+function isDirectRun() {
+  if (!process.argv[1]) return false;
+
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (isDirectRun()) {
   const [, , command, ...args] = process.argv;
   const handler = COMMANDS[command];
 
@@ -262,10 +276,12 @@ function cmdInit(args) {
     );
   }
 
-  // Copy package.json
-  copyFileSync(
-    join(PACKAGE_ROOT, "package.json"),
-    join(desktopDir, "package.json")
+  // Give the project its own package.json. Copying the shell's would name every
+  // scaffolded app "turbo-desktop", carry a bin pointing at a cli/ directory
+  // that is not there, and pull in the shell's own dev dependencies.
+  writeFileSync(
+    join(desktopDir, "package.json"),
+    JSON.stringify(desktopPackage(appName), null, 2) + "\n"
   );
 
   // Create the app config file. The filesystem and sudo bridges start closed —
@@ -513,6 +529,32 @@ function slugify(name) {
  * links silently open the wrong one. Pick something distinctive — nothing stops
  * other software registering the same string.
  */
+/**
+ * The package.json a scaffolded desktop project gets.
+ *
+ * It depends on the published shell rather than vendoring it, so an app picks up
+ * fixes with an ordinary npm update.
+ */
+export function desktopPackage(appName) {
+  return {
+    name: `${slugify(appName)}-desktop`,
+    version: "0.1.0",
+    private: true,
+    type: "module",
+    scripts: {
+      dev: "turbo-desktop dev",
+      build: "turbo-desktop build",
+      tauri: "tauri",
+    },
+    dependencies: {
+      "turbo-desktop": `^${packageVersion()}`,
+    },
+    devDependencies: {
+      "@tauri-apps/cli": "^2.0.0",
+    },
+  };
+}
+
 export function urlScheme(appName) {
   return slugify(appName);
 }

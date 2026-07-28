@@ -5,9 +5,43 @@
   "author": "RaiderHQ",
   "license": "MIT",
   "type": "module",
+  "homepage": "https://github.com/aguspe/turbo_desktop",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aguspe/turbo_desktop.git"
+  },
+  "bugs": {
+    "url": "https://github.com/aguspe/turbo_desktop/issues"
+  },
+  "keywords": [
+    "turbo",
+    "hotwire",
+    "rails",
+    "tauri",
+    "desktop",
+    "hotwire-native"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "bin": {
     "turbo-desktop": "./cli/turbo-desktop.js"
   },
+  "//files": "The CLI scaffolds a project by copying these out of the installed package, so they have to ship with it.",
+  "files": [
+    "cli",
+    "src",
+    "src-tauri/src",
+    "src-tauri/icons/*.png",
+    "src-tauri/icons/*.icns",
+    "src-tauri/icons/*.ico",
+    "src-tauri/capabilities",
+    "src-tauri/Cargo.toml",
+    "src-tauri/build.rs",
+    "src-tauri/tauri.conf.json",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "tauri": "tauri",
     "dev": "cargo tauri dev",
