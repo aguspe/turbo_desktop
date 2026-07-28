@@ -443,30 +443,136 @@
     };
   };
 
-  // ─── Offline Detection ─────────────────────────────────────────────────────
+  // ─── Connection & Visit Errors ─────────────────────────────────────────────
 
   /**
-   * Show a non-intrusive overlay when the connection to the server drops.
-   * Dismiss automatically when connectivity is restored.
+   * Error names, matching Hotwire Native's TurboError / VisitError so the same
+   * words mean the same thing on mobile and desktop.
    */
-  window.addEventListener("offline", () => {
-    if (document.getElementById("turbo-desktop-offline-overlay")) return;
+  TurboDesktop.errors = {
+    NETWORK_FAILURE: "network_failure",
+    TIMEOUT_FAILURE: "timeout_failure",
+    HTTP_FAILURE: "http_failure",
+    PAGE_LOAD_FAILURE: "page_load_failure",
+  };
+
+  const OVERLAY_ID = "turbo-desktop-offline-overlay";
+
+  /**
+   * Whether the shell presents failures itself.
+   *
+   * Opt out to present your own, the same way Hotwire Native lets you override
+   * visitableDidFailRequest:
+   *
+   *   <meta name="turbo-desktop-error-handling" content="manual">
+   *
+   * Then listen for the events below and render whatever you like.
+   */
+  function shellPresentsErrors() {
+    const meta = document.querySelector('meta[name="turbo-desktop-error-handling"]');
+    return !meta || meta.content !== "manual";
+  }
+
+  /**
+   * Announce a failed visit. Cancelable: preventDefault() suppresses the shell's
+   * own banner for this one event, whatever the meta tag says.
+   *
+   * Listeners receive { error, status, retry }, where retry() attempts the visit
+   * again — the desktop equivalent of Hotwire Native's retryHandler.
+   */
+  function reportVisitError(error, { status = null, retry = null } = {}) {
+    const event = new CustomEvent("turbo-desktop:visit-error", {
+      detail: { error, status, retry: retry || (() => window.location.reload()) },
+      cancelable: true,
+    });
+
+    const notPrevented = document.dispatchEvent(event);
+    console.warn("[turbo-desktop] Visit error:", error, status ?? "");
+
+    if (notPrevented && shellPresentsErrors()) showOfflineBanner();
+  }
+
+  function reportConnection(online, error) {
+    document.dispatchEvent(
+      new CustomEvent("turbo-desktop:connection", { detail: { online, error } })
+    );
+
+    if (online) {
+      hideOfflineBanner();
+    } else if (shellPresentsErrors()) {
+      showOfflineBanner();
+    }
+  }
+
+  function showOfflineBanner() {
+    if (!document.body || document.getElementById(OVERLAY_ID)) return;
+
     const overlay = document.createElement("div");
-    overlay.id = "turbo-desktop-offline-overlay";
+    overlay.id = OVERLAY_ID;
+    overlay.setAttribute("role", "status");
     overlay.style.cssText =
       "position:fixed;bottom:0;left:0;right:0;padding:12px 20px;background:#1a1a2e;" +
       "color:#e0e0e0;font-family:system-ui,sans-serif;font-size:14px;text-align:center;" +
       "z-index:99999;border-top:2px solid #e73c7e;";
-    overlay.textContent = "Connection lost — waiting for server...";
+    overlay.textContent = "Can't reach the server — retrying…";
     document.body.appendChild(overlay);
-    console.warn("[turbo-desktop] Network offline detected");
+  }
+
+  function hideOfflineBanner() {
+    const overlay = document.getElementById(OVERLAY_ID);
+    if (overlay) overlay.remove();
+  }
+
+  TurboDesktop.reportVisitError = reportVisitError;
+
+  /**
+   * The shell watches the server and tells us when it goes away or comes back.
+   *
+   * The browser's own offline event only fires when this machine loses its
+   * network, which is not the case that usually happens — the server going down
+   * while the network is fine looks entirely healthy from in here.
+   */
+  if (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.event) {
+    // Tauri's listen() is promise-based and may not exist in older shells.
+    try {
+      const listen = window.__TAURI__ && window.__TAURI__.event && window.__TAURI__.event.listen;
+      if (listen) {
+        listen("turbo-desktop:connection", (event) => {
+          const payload = event.payload || {};
+          reportConnection(Boolean(payload.online), payload.error || null);
+        });
+      }
+    } catch (e) {
+      console.debug("[turbo-desktop] Connection events unavailable:", e);
+    }
+  }
+
+  /**
+   * Turbo reports its own failures. In a Turbo app most navigation is a fetch
+   * rather than a document load, so this fires long before anything reaches the
+   * webview's own error page.
+   */
+  document.addEventListener("turbo:fetch-request-error", (event) => {
+    const url = event.detail && event.detail.url;
+    reportVisitError(TurboDesktop.errors.NETWORK_FAILURE, {
+      retry: () => (url ? window.location.replace(url) : window.location.reload()),
+    });
   });
 
-  window.addEventListener("online", () => {
-    const overlay = document.getElementById("turbo-desktop-offline-overlay");
-    if (overlay) overlay.remove();
-    console.log("[turbo-desktop] Network back online");
+  /** A visit that completed with an error status. */
+  document.addEventListener("turbo:before-fetch-response", (event) => {
+    const response = event.detail && event.detail.fetchResponse;
+    if (!response || response.succeeded || response.statusCode < 500) return;
+
+    reportVisitError(TurboDesktop.errors.HTTP_FAILURE, { status: response.statusCode });
   });
+
+  // This machine losing its network is a different thing, but it looks the same
+  // to the person using the app.
+  window.addEventListener("offline", () =>
+    reportConnection(false, TurboDesktop.errors.NETWORK_FAILURE)
+  );
+  window.addEventListener("online", () => reportConnection(true, null));
 
   // ─── Initial Setup ─────────────────────────────────────────────────────────
 

@@ -3,6 +3,7 @@
 
 mod bridge;
 mod config;
+mod connection;
 mod fs_bridge;
 mod menu;
 mod navigation;
@@ -15,32 +16,17 @@ mod updater_bridge;
 mod window;
 
 use config::PathConfigurationStore;
-use std::net::{TcpStream, ToSocketAddrs};
+use connection::{ConnectionMonitor, Transition, VisitError};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::webview::PageLoadEvent;
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
-/// How long to wait when checking whether the app server is up.
-const REACHABILITY_TIMEOUT: Duration = Duration::from_millis(500);
+/// How often to check that the app server is still answering.
+const PROBE_INTERVAL: Duration = Duration::from_secs(5);
 
-/// Can we open a TCP connection to the app server?
-///
-/// Decides whether the window opens on the app or on the bundled "waiting for
-/// your server" page. A plain connect keeps startup predictable — no HTTP
-/// client, no async runtime, and a bounded wait.
-fn server_is_reachable(url: &url::Url) -> bool {
-    let (Some(host), Some(port)) = (url.host_str(), url.port_or_known_default()) else {
-        return false;
-    };
-
-    match (host, port).to_socket_addrs() {
-        Ok(addrs) => addrs
-            .into_iter()
-            .any(|addr| TcpStream::connect_timeout(&addr, REACHABILITY_TIMEOUT).is_ok()),
-        Err(_) => false,
-    }
-}
+/// Event the web layer listens on for connection changes.
+const CONNECTION_EVENT: &str = "turbo-desktop:connection";
 
 fn main() {
     env_logger::init();
@@ -115,17 +101,17 @@ fn main() {
             // scripting a redirect away from it.
             let url: url::Url = server_url.parse().expect("Invalid server URL");
 
-            let target = if server_is_reachable(&url) {
+            let reachable_at_startup = connection::server_is_reachable(&url);
+            let target = if reachable_at_startup {
                 WebviewUrl::External(url.clone())
             } else {
-                log::warn!(
-                    "Could not reach {} — opening the bundled waiting page instead",
-                    url
-                );
-                WebviewUrl::App("index.html".into())
+                log::warn!("Could not reach {} — opening the error page instead", url);
+                WebviewUrl::App(
+                    format!("error.html?error={}", VisitError::NetworkFailure.slug()).into(),
+                )
             };
 
-            // The waiting page polls this to know where to redirect once the
+            // The error page polls this to know where to return to once the
             // server answers; without it that page falls back to a guess.
             let server_url_script = format!(
                 "window.__TURBO_DESKTOP_SERVER_URL__ = {};",
@@ -176,6 +162,12 @@ fn main() {
                 }
             });
 
+            // Watch the server so a drop is noticed while the app sits idle.
+            // The web layer cannot see this on its own: the browser's `offline`
+            // event reports the machine losing its network, not the app server
+            // going away, which is the case that actually happens.
+            watch_connection(app_handle.clone(), url.clone(), reachable_at_startup);
+
             // Set up the system tray icon
             if let Err(e) = tray::setup_tray(&app_handle) {
                 log::warn!("Could not set up system tray: {}", e);
@@ -192,6 +184,7 @@ fn main() {
             navigation::close_modal,
             bridge::handle_bridge_message,
             bridge::send_bridge_response,
+            connection::retry_connection,
             window::get_window_info,
         ])
         .build(tauri::generate_context!())
@@ -211,6 +204,78 @@ fn main() {
                 tauri::async_runtime::block_on(pm.kill_all());
             }
         });
+}
+
+/// Poll the app server and tell the web layer when reachability changes.
+///
+/// Only transitions are emitted, so a server that stays down is reported once
+/// rather than every few seconds.
+fn watch_connection(app: tauri::AppHandle, url: url::Url, reachable_at_startup: bool) {
+    tauri::async_runtime::spawn(async move {
+        let mut monitor = ConnectionMonitor::new();
+
+        // Seed the monitor so a start on the error page is already "offline" and
+        // recovery gets announced rather than passing silently.
+        if !reachable_at_startup {
+            for _ in 0..2 {
+                monitor.record(false);
+            }
+        }
+
+        loop {
+            tokio::time::sleep(PROBE_INTERVAL).await;
+
+            let probe_url = url.clone();
+            let reachable =
+                tokio::task::spawn_blocking(move || connection::server_is_reachable(&probe_url))
+                    .await
+                    .unwrap_or(false);
+
+            let payload = match monitor.record(reachable) {
+                Transition::WentOffline(error) => {
+                    log::warn!("Lost the connection to {}", url);
+                    serde_json::json!({ "online": false, "error": error })
+                }
+                Transition::CameOnline => {
+                    log::info!("Reconnected to {}", url);
+                    return_to_app_if_on_error_page(&app, &url);
+                    serde_json::json!({ "online": true, "error": null })
+                }
+                Transition::Unchanged => continue,
+            };
+
+            if let Err(e) = app.emit(CONNECTION_EVENT, payload) {
+                log::warn!("Could not report the connection change: {}", e);
+            }
+        }
+    });
+}
+
+/// Send the window back to the app once the server answers again.
+///
+/// Only when it is sitting on the bundled error page — if the app is still
+/// loaded, navigating would throw away whatever the person was doing, and the
+/// web layer handles that case itself with the connection event.
+///
+/// Recovery is driven from here rather than by the error page polling, because
+/// that page runs under the bundle's content security policy and cannot reach
+/// the server to find out for itself.
+fn return_to_app_if_on_error_page(app: &tauri::AppHandle, url: &url::Url) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let Ok(current) = window.url() else {
+        return;
+    };
+
+    if !security::is_bundled_app_origin(&current) {
+        return;
+    }
+
+    log::info!("Returning to {}", url);
+    if let Err(e) = window.navigate(url.clone()) {
+        log::warn!("Could not navigate back to the app: {}", e);
+    }
 }
 
 /// Write the last known window size so the next launch reopens at it.

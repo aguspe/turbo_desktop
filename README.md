@@ -238,6 +238,51 @@ The Bridge is the desktop equivalent of **Strada**. It lets your web components 
 | `badge` | Set the dock/taskbar badge count |
 | `shortcut` | Register global keyboard shortcuts |
 
+### Connection loss and error pages
+
+The shell watches your server and reports failures using the same vocabulary as
+Hotwire Native, so `network_failure`, `timeout_failure`, `http_failure` and
+`page_load_failure` mean here what they mean on turbo-ios and turbo-android.
+
+**What happens by default.** If your server is unreachable at launch, the window
+opens on a bundled error page. If it goes away while the app is running, a
+banner appears. Either way the shell keeps probing, and puts the window back on
+your app as soon as the server answers — you do not have to do anything.
+
+The shell is what notices this, not the web layer, because the browser's
+`offline` event fires when *this machine* loses its network, not when your
+server goes down. The second is the case that actually happens.
+
+**Customising the error page.** `desktop/src/error.html` is yours. It is
+bundled with your app, so it must work with no network: inline everything, no
+CDN fonts or remote stylesheets. It receives the server URL as
+`window.__TURBO_DESKTOP_SERVER_URL__` and the reason as an `?error=` parameter.
+
+**Handling failures in your app instead.** Listen for `turbo-desktop:visit-error`
+and call `preventDefault()` to suppress the shell's banner for that failure:
+
+```js
+document.addEventListener("turbo-desktop:visit-error", (event) => {
+  const { error, status, retry } = event.detail
+  event.preventDefault()
+  showMyOwnBanner(error, status, retry)   // retry() attempts the visit again
+})
+```
+
+`retry` is the desktop counterpart of the retry handler Hotwire Native passes to
+a failed visitable. To take over presentation entirely rather than case by case:
+
+```html
+<meta name="turbo-desktop-error-handling" content="manual">
+```
+
+There is also `turbo-desktop:connection` with `{ online, error }` for reacting to
+the connection dropping and returning without tying it to a specific visit.
+
+Server errors your app can render itself are left alone — a 404 or a 422 is your
+page to serve. Only 5xx responses and failures to reach the server at all are
+reported.
+
 ### Bridge security
 
 The bridge reaches the shell, the filesystem and (on macOS) administrator

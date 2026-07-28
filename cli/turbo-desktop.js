@@ -159,6 +159,7 @@ function cmdInit(args) {
     "main.rs",
     "bridge.rs",
     "config.rs",
+    "connection.rs",
     "fs_bridge.rs",
     "menu.rs",
     "navigation.rs",
@@ -234,6 +235,11 @@ function cmdInit(args) {
   copyFileSync(
     join(PACKAGE_ROOT, "src", "index.html"),
     join(desktopDir, "src", "index.html")
+  );
+  // Yours to customise — shown whenever the shell cannot reach your app.
+  copyFileSync(
+    join(PACKAGE_ROOT, "src", "error.html"),
+    join(desktopDir, "src", "error.html")
   );
   if (existsSync(join(PACKAGE_ROOT, "src", "inspector.js"))) {
     copyFileSync(
