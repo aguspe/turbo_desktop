@@ -201,7 +201,7 @@ The path configuration is a JSON file that maps URL patterns to presentation rul
     },
     {
       "patterns": ["/new$", "/edit$"],
-      "properties": { "presentation": "modal", "title": "Edit" }
+      "properties": { "presentation": "modal", "title": "Edit", "width": 640, "height": 480 }
     },
     {
       "patterns": ["/reports/"],
@@ -218,7 +218,7 @@ The path configuration is a JSON file that maps URL patterns to presentation rul
 | Presentation | Behavior |
 |---|---|
 | `default` | Navigate in the current window (Turbo Drive handles it) |
-| `modal` | Open the URL in a modal-style window (800×600) |
+| `modal` | Open the URL in a modal-style window (800×600 unless the rule sets `width`/`height`) |
 | `new_window` | Open the URL in a full separate window (1200×800) |
 | `replace` | Replace the current page with no back-navigation |
 | `native` | Emit a `native-screen-requested` event for Rust UI |
@@ -237,6 +237,25 @@ The Bridge is the desktop equivalent of **Strada**. It lets your web components 
 | `file-picker` | Open native file-open/save dialogs |
 | `badge` | Set the dock/taskbar badge count |
 | `shortcut` | Register global keyboard shortcuts |
+
+### Modal and secondary windows
+
+A rule with `presentation: "modal"` or `"new_window"` opens the URL in its own
+window, sized by the rule's `width` and `height`. These carry everything the
+main window does — the user agent your Rails app detects on, off-origin links
+going to the browser, and a working bridge.
+
+A page in one of these windows knows where it is and can dismiss itself:
+
+```js
+if (TurboDesktop.isModal) {
+  TurboDesktop.closeModal()      // no argument: closes the window it is in
+}
+TurboDesktop.windowLabel         // e.g. "modal-9b8b948"
+```
+
+Note these are separate top-level windows rather than sheets attached to the
+main one, so they do not block interaction with it.
 
 ### External links
 

@@ -88,12 +88,34 @@
     },
 
     /**
-     * Close a modal window.
+     * The label of the window this page is in, or null outside the shell.
      */
-    async closeModal(label) {
+    get windowLabel() {
+      return window.__TURBO_DESKTOP_WINDOW_LABEL__ || null;
+    },
+
+    /**
+     * True when this page is in a modal window rather than the main one.
+     */
+    get isModal() {
+      return String(this.windowLabel || "").startsWith("modal-");
+    },
+
+    /**
+     * Close a modal window. Defaults to the window this page is in, so a page
+     * can dismiss itself without being told which window it was opened in.
+     */
+    async closeModal(label = undefined) {
       if (!INVOKE) return;
+
+      const target = label || TurboDesktop.windowLabel;
+      if (!target) {
+        console.warn("[turbo-desktop] No window label to close");
+        return;
+      }
+
       try {
-        await INVOKE("close_modal", { label });
+        await INVOKE("close_modal", { label: target });
       } catch (e) {
         console.error("[turbo-desktop] Close modal failed:", e);
       }
