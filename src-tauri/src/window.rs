@@ -30,6 +30,26 @@ pub struct TurboDesktopConfig {
     /// Where links are allowed to open
     #[serde(default)]
     pub navigation: NavigationConfig,
+    /// How to start the app server, when the app should start one itself
+    #[serde(default)]
+    pub server: ServerConfig,
+}
+
+/// The app server this shell puts in its window.
+///
+/// With a command set, opening the app starts the server too, so it behaves
+/// like an application rather than a viewer for something you have to run
+/// first. Left empty, the shell expects a server that is already running.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ServerConfig {
+    /// Run through a login shell, so a Ruby version manager is set up the same
+    /// way it would be in a terminal.
+    #[serde(default)]
+    pub command: Option<String>,
+    /// Where to run it, relative to this config file. Defaults to `..`, which
+    /// is where the scaffold puts the Rails app.
+    #[serde(default)]
+    pub directory: Option<String>,
 }
 
 /// Which links stay in the app and which are handed to the browser.
@@ -170,6 +190,7 @@ fn default_config() -> TurboDesktopConfig {
         filesystem: FilesystemConfig::default(),
         sudo: SudoConfig::default(),
         navigation: NavigationConfig::default(),
+        server: ServerConfig::default(),
     }
 }
 

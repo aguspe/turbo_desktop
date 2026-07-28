@@ -173,6 +173,32 @@ tamper-*resistant* once you sign the app — see
 If the server is not reachable when the app launches, it opens a bundled page
 that waits and redirects once your server answers.
 
+#### Starting the server automatically
+
+With a `server` block, opening the app starts your Rails server too, so the app
+behaves like an application rather than a viewer for something you have to run
+first:
+
+```json
+{
+  "server": {
+    "command": "bin/rails server",
+    "directory": ".."
+  }
+}
+```
+
+- `command` runs through your login shell, so a Ruby version manager (rbenv,
+  asdf, mise) is set up the same way it would be in a terminal.
+- `directory` is resolved relative to the config file and defaults to `..` —
+  the project root, one level above `desktop/`.
+
+If something is already listening on `server_url` — a server you started by
+hand, say — the app leaves it alone: it neither starts a second one nor kills
+yours on quit. A server the app did start is stopped when the app quits.
+
+Omit `command` (or the whole block) to manage the server yourself.
+
 ### 3. Add the Rails gem
 
 ```ruby
@@ -195,12 +221,11 @@ get "/turbo-desktop/path-configuration", to: "turbo_desktop#path_configuration"
 ### 5. Run the desktop app
 
 ```bash
-# Start your Rails server
-bin/rails server
-
-# Start the Tauri desktop app
 cargo tauri dev
 ```
+
+With a `server.command` configured, this also starts your Rails server; without
+one, run `bin/rails server` in another terminal first.
 
 ## Path Configuration
 
