@@ -602,10 +602,60 @@
       case "navigate":
         performNavigation(detail.action);
         break;
+      case "focus":
+        handleFocusReturn(detail);
+        break;
       default:
         console.debug("[turbo-desktop] Ignoring unknown message:", kind);
     }
   };
+
+  /**
+   * True when someone is part-way through entering something.
+   *
+   * A refresh would throw it away, which is a far worse outcome than showing
+   * data a few seconds stale, so it is the one case the shell's proposal is
+   * declined without being asked.
+   */
+  function isEditing() {
+    const active = document.activeElement;
+    if (!active) return false;
+
+    const tag = active.tagName;
+    return (
+      tag === "INPUT" ||
+      tag === "TEXTAREA" ||
+      tag === "SELECT" ||
+      active.isContentEditable === true
+    );
+  }
+
+  /**
+   * The window came back after being away.
+   *
+   * Announced as a cancelable event whether or not a refresh is proposed, so an
+   * app can revalidate its own way — or veto the refresh, which is worth doing
+   * if it knows about unsaved state the focus check cannot see.
+   */
+  function handleFocusReturn(detail) {
+    const event = new CustomEvent("turbo-desktop:focus", {
+      detail: {
+        awaySeconds: detail.awaySeconds || 0,
+        refreshing: Boolean(detail.refreshing),
+      },
+      cancelable: true,
+    });
+
+    const notPrevented = document.dispatchEvent(event);
+    if (!detail.refreshing || !notPrevented) return;
+
+    if (isEditing()) {
+      console.debug("[turbo-desktop] Not refreshing on focus while editing");
+      return;
+    }
+
+    performNavigation("refresh");
+  }
 
   /**
    * Act on what the shell asked the page underneath to do after a modal closed.

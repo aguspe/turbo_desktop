@@ -685,3 +685,83 @@ describe("Messages from the shell", () => {
     window.TurboDesktop.__receive("something-new", { a: 1 });
   });
 });
+
+describe("Returning to the window", () => {
+  function focusReturn(window, detail) {
+    window.TurboDesktop.__receive("focus", detail);
+  }
+
+  it("refreshes when the shell says the absence was long enough", () => {
+    const { window } = createEnvironment();
+    const visits = [];
+    window.Turbo = { visit: (url, opts) => visits.push({ url, opts }) };
+
+    focusReturn(window, { awaySeconds: 120, refreshing: true });
+
+    assert.strictEqual(visits.length, 1);
+    assert.strictEqual(visits[0].opts.action, "replace");
+  });
+
+  it("does nothing when the absence was short", () => {
+    const { window } = createEnvironment();
+    const visits = [];
+    window.Turbo = { visit: (url, opts) => visits.push({ url, opts }) };
+
+    focusReturn(window, { awaySeconds: 3, refreshing: false });
+
+    assert.deepStrictEqual(visits, []);
+  });
+
+  it("announces the return either way", () => {
+    const { window } = createEnvironment();
+    const seen = [];
+    window.document.addEventListener("turbo-desktop:focus", (e) => seen.push(e.detail));
+
+    focusReturn(window, { awaySeconds: 3, refreshing: false });
+    focusReturn(window, { awaySeconds: 300, refreshing: true });
+
+    assert.strictEqual(seen.length, 2);
+    assert.strictEqual(seen[0].awaySeconds, 3);
+    assert.strictEqual(seen[1].refreshing, true);
+  });
+
+  it("lets the app veto the refresh", () => {
+    const { window } = createEnvironment();
+    const visits = [];
+    window.Turbo = { visit: (url, opts) => visits.push({ url, opts }) };
+    window.document.addEventListener("turbo-desktop:focus", (e) => e.preventDefault());
+
+    focusReturn(window, { awaySeconds: 300, refreshing: true });
+
+    assert.deepStrictEqual(visits, [], "the app knows about state we cannot see");
+  });
+
+  it("does not throw away what someone is typing", () => {
+    const { window } = createEnvironment();
+    const visits = [];
+    window.Turbo = { visit: (url, opts) => visits.push({ url, opts }) };
+
+    const input = window.document.createElement("input");
+    window.document.body.appendChild(input);
+    input.focus();
+
+    focusReturn(window, { awaySeconds: 3600, refreshing: true });
+
+    assert.deepStrictEqual(visits, [], "a half-filled form outranks stale data");
+  });
+
+  it("refreshes once the field is no longer focused", () => {
+    const { window } = createEnvironment();
+    const visits = [];
+    window.Turbo = { visit: (url, opts) => visits.push({ url, opts }) };
+
+    const input = window.document.createElement("input");
+    window.document.body.appendChild(input);
+    input.focus();
+    input.blur();
+
+    focusReturn(window, { awaySeconds: 3600, refreshing: true });
+
+    assert.strictEqual(visits.length, 1);
+  });
+});

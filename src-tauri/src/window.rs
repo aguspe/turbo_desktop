@@ -35,6 +35,16 @@ pub struct TurboDesktopConfig {
 /// Which links stay in the app and which are handed to the browser.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct NavigationConfig {
+    /// Refresh the page when the window is focused again after this many
+    /// seconds away. `None` or `0` leaves it off.
+    ///
+    /// Mobile shells reload when the app returns to the foreground, and stale
+    /// data is the same problem here. A desktop window loses focus constantly
+    /// though — every glance at another app — so this waits for an absence long
+    /// enough to mean the data has probably moved on, rather than firing on
+    /// every alt-tab.
+    #[serde(default)]
+    pub refresh_after_seconds: Option<u64>,
     /// Hosts other than the app's own that may load in the app window.
     ///
     /// Anything else goes to the system browser, matching how Hotwire Native
@@ -336,6 +346,35 @@ impl LastWindowSize {
     }
 }
 
+/// When the main window last lost focus.
+#[derive(Default)]
+pub struct FocusTracker(std::sync::Mutex<Option<std::time::Instant>>);
+
+impl FocusTracker {
+    pub fn left(&self) {
+        if let Ok(mut since) = self.0.lock() {
+            *since = Some(std::time::Instant::now());
+        }
+    }
+
+    /// Seconds away, consumed so the same absence is only reported once.
+    pub fn returned(&self) -> Option<u64> {
+        let mut since = self.0.lock().ok()?;
+        let left_at = since.take()?;
+        Some(left_at.elapsed().as_secs())
+    }
+}
+
+/// Whether an absence of `away_seconds` should refresh the page.
+///
+/// Separate from the window plumbing so the rule can be checked directly.
+pub fn should_refresh_after(config: &NavigationConfig, away_seconds: u64) -> bool {
+    match config.refresh_after_seconds {
+        Some(threshold) if threshold > 0 => away_seconds >= threshold,
+        _ => false,
+    }
+}
+
 /// Read preferences, treating any problem as "no preferences yet".
 ///
 /// Unlike the app config, a broken file here is not fatal. It holds recoverable
@@ -515,6 +554,48 @@ mod tests {
         assert!(err.contains("not valid JSON"), "got: {err}");
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn refreshing_on_focus_is_off_unless_asked_for() {
+        let config = NavigationConfig::default();
+
+        assert!(!should_refresh_after(&config, 0));
+        assert!(!should_refresh_after(&config, 86_400));
+    }
+
+    #[test]
+    fn a_threshold_of_zero_is_also_off() {
+        let config = NavigationConfig {
+            refresh_after_seconds: Some(0),
+            ..NavigationConfig::default()
+        };
+
+        assert!(!should_refresh_after(&config, 999));
+    }
+
+    #[test]
+    fn a_short_absence_does_not_refresh() {
+        let config = NavigationConfig {
+            refresh_after_seconds: Some(60),
+            ..NavigationConfig::default()
+        };
+
+        // Glancing at another app should not reload the page.
+        assert!(!should_refresh_after(&config, 5));
+        assert!(should_refresh_after(&config, 60), "the threshold itself counts");
+        assert!(should_refresh_after(&config, 3_600));
+    }
+
+    #[test]
+    fn an_absence_is_only_reported_once() {
+        let tracker = FocusTracker::default();
+
+        assert_eq!(tracker.returned(), None, "opening is not returning");
+
+        tracker.left();
+        assert!(tracker.returned().is_some());
+        assert_eq!(tracker.returned(), None, "the same absence must not repeat");
     }
 
     #[test]
