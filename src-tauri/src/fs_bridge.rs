@@ -15,17 +15,27 @@ pub async fn handle_filesystem(
     app: &tauri::AppHandle,
     message: &BridgeMessage,
 ) -> Result<serde_json::Value, String> {
-    let roots = configured_roots(app);
+    let scope = FsScope {
+        roots: configured_roots(app),
+        grants: app.state::<security::UserGrants>(),
+    };
 
     match message.event.as_str() {
-        "read" => handle_read(message, &roots).await,
-        "write" => handle_write(message, &roots).await,
-        "exists" => handle_exists(message, &roots).await,
-        "list" => handle_list(message, &roots).await,
-        "mkdir" => handle_mkdir(message, &roots).await,
-        "remove" => handle_remove(message, &roots).await,
+        "read" => handle_read(message, &scope).await,
+        "write" => handle_write(message, &scope).await,
+        "exists" => handle_exists(message, &scope).await,
+        "list" => handle_list(message, &scope).await,
+        "mkdir" => handle_mkdir(message, &scope).await,
+        "remove" => handle_remove(message, &scope).await,
         _ => Ok(serde_json::json!({ "status": "unknown_event" })),
     }
+}
+
+/// Where this app may reach: the configured roots, plus whatever the user has
+/// granted through a native file dialog this session.
+struct FsScope<'a> {
+    roots: Vec<PathBuf>,
+    grants: tauri::State<'a, security::UserGrants>,
 }
 
 /// Roots this app may touch, defaulting to its own data directory.
@@ -35,26 +45,26 @@ fn configured_roots(app: &tauri::AppHandle) -> Vec<PathBuf> {
     security::allowed_roots(app_data_dir, &config.filesystem)
 }
 
-/// Pull the `path` field out of a message and resolve it inside the allowed roots.
+/// Pull the `path` field out of a message and resolve it inside the scope.
 fn scoped_path(
     message: &BridgeMessage,
-    roots: &[PathBuf],
+    scope: &FsScope<'_>,
     event: &str,
 ) -> Result<PathBuf, String> {
     let raw = message.data["path"]
         .as_str()
         .ok_or_else(|| format!("Missing 'path' in filesystem {}", event))?;
 
-    security::resolve_in_scope(raw, roots).inspect_err(|e| {
+    security::resolve_with_grants(raw, &scope.roots, &scope.grants).inspect_err(|e| {
         log::warn!("Filesystem: {}", e);
     })
 }
 
 async fn handle_read(
     message: &BridgeMessage,
-    roots: &[PathBuf],
+    scope: &FsScope<'_>,
 ) -> Result<serde_json::Value, String> {
-    let path = scoped_path(message, roots, "read")?;
+    let path = scoped_path(message, scope, "read")?;
 
     match fs::read_to_string(&path).await {
         Ok(content) => Ok(serde_json::json!({ "status": "ok", "content": content })),
@@ -64,13 +74,13 @@ async fn handle_read(
 
 async fn handle_write(
     message: &BridgeMessage,
-    roots: &[PathBuf],
+    scope: &FsScope<'_>,
 ) -> Result<serde_json::Value, String> {
     let content = message.data["content"]
         .as_str()
         .ok_or("Missing 'content' in filesystem write")?;
     let append = message.data["append"].as_bool().unwrap_or(false);
-    let path = scoped_path(message, roots, "write")?;
+    let path = scoped_path(message, scope, "write")?;
 
     let result = if append {
         let mut file = fs::OpenOptions::new()
@@ -92,9 +102,9 @@ async fn handle_write(
 
 async fn handle_exists(
     message: &BridgeMessage,
-    roots: &[PathBuf],
+    scope: &FsScope<'_>,
 ) -> Result<serde_json::Value, String> {
-    let path = scoped_path(message, roots, "exists")?;
+    let path = scoped_path(message, scope, "exists")?;
 
     match fs::metadata(&path).await {
         Ok(meta) => Ok(serde_json::json!({
@@ -114,9 +124,9 @@ async fn handle_exists(
 
 async fn handle_list(
     message: &BridgeMessage,
-    roots: &[PathBuf],
+    scope: &FsScope<'_>,
 ) -> Result<serde_json::Value, String> {
-    let path = scoped_path(message, roots, "list")?;
+    let path = scoped_path(message, scope, "list")?;
 
     let mut entries = Vec::new();
     let mut dir = match fs::read_dir(&path).await {
@@ -143,9 +153,9 @@ async fn handle_list(
 
 async fn handle_mkdir(
     message: &BridgeMessage,
-    roots: &[PathBuf],
+    scope: &FsScope<'_>,
 ) -> Result<serde_json::Value, String> {
-    let path = scoped_path(message, roots, "mkdir")?;
+    let path = scoped_path(message, scope, "mkdir")?;
 
     match fs::create_dir_all(&path).await {
         Ok(()) => Ok(serde_json::json!({ "status": "ok" })),
@@ -155,10 +165,10 @@ async fn handle_mkdir(
 
 async fn handle_remove(
     message: &BridgeMessage,
-    roots: &[PathBuf],
+    scope: &FsScope<'_>,
 ) -> Result<serde_json::Value, String> {
     let recursive = message.data["recursive"].as_bool().unwrap_or(false);
-    let path = scoped_path(message, roots, "remove")?;
+    let path = scoped_path(message, scope, "remove")?;
 
     let result = match fs::metadata(&path).await {
         Ok(meta) if meta.is_dir() && recursive => fs::remove_dir_all(&path).await,
