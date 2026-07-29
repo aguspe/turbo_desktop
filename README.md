@@ -550,6 +550,27 @@ await TurboDesktop.clipboard.writeText("INV-2024-001");
 Ordinary copy and paste inside the page keeps working through the webview as
 in any browser.
 
+### Launch at login
+
+Offer a toggle in your app's settings page; the shell records the choice with
+the OS — a Launch Agent on macOS, the registry `Run` key on Windows, an XDG
+autostart entry on Linux:
+
+```js
+// A Stimulus controller behind a checkbox
+async toggle(event) {
+  if (event.target.checked) await TurboDesktop.autostart.enable();
+  else await TurboDesktop.autostart.disable();
+}
+
+async connect() {
+  this.checkboxTarget.checked = await TurboDesktop.autostart.isEnabled();
+}
+```
+
+It is deliberately not a config key: registering login items silently is how
+apps end up on "why does this start with my computer" lists. Ask first.
+
 ### Dev Inspector
 
 In development, press **Cmd/Ctrl+Shift+D** to open the Dev Inspector — an in-app
