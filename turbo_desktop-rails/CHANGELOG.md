@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0 (2026-07-29)
+
+Version aligned with the desktop shell's 0.2.0 release (server auto-start,
+Windows support, cross-platform sudo, drag & drop, file associations,
+clipboard, launch-at-login). No gem-side API changes.
+
 ## 0.1.1 (2026-07-27)
 
 ### Added
