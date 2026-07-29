@@ -42,8 +42,8 @@ pub struct TurboDesktopConfig {
 /// first. Left empty, the shell expects a server that is already running.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ServerConfig {
-    /// Run through a login shell, so a Ruby version manager is set up the same
-    /// way it would be in a terminal.
+    /// Runs through a login shell on Unix, so a Ruby version manager is set up
+    /// the same way it would be in a terminal; through `cmd` on Windows.
     #[serde(default)]
     pub command: Option<String>,
     /// Where to run it, relative to this config file. Defaults to `..`, which

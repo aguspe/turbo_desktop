@@ -188,8 +188,10 @@ first:
 }
 ```
 
-- `command` runs through your login shell, so a Ruby version manager (rbenv,
-  asdf, mise) is set up the same way it would be in a terminal.
+- `command` runs through your login shell on macOS and Linux, so a Ruby version
+  manager (rbenv, asdf, mise) is set up the same way it would be in a terminal.
+  On Windows it runs through `cmd`, and the Unix `bin/rails` binstub does not
+  apply — set `command` to `ruby bin\rails server` there.
 - `directory` is resolved relative to the config file and defaults to `..` —
   the project root, one level above `desktop/`.
 
