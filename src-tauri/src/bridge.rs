@@ -61,6 +61,15 @@ pub async fn handle_bridge_message(
         "shell" => crate::shell_bridge::handle_shell(&app, &message).await,
         "filesystem" => crate::fs_bridge::handle_filesystem(&app, &message).await,
         "sudo" => crate::sudo_bridge::handle_sudo(&app, &message).await,
+        // The page drains files the OS asked the app to open. Pull rather than
+        // push: a launch-by-double-click happens before any page exists.
+        "file-open" => match message.event.as_str() {
+            "pending" => Ok(serde_json::json!({
+                "status": "ok",
+                "paths": crate::deep_link::drain_pending(&app),
+            })),
+            _ => Ok(serde_json::json!({ "status": "unknown_event" })),
+        },
         "updater" => crate::updater_bridge::handle_updater(&app, &message).await,
         _ => {
             // Forward unknown components as events — allows user-defined bridge components

@@ -42,6 +42,7 @@ fn main() {
         .manage(window::LastWindowSize::default())
         .manage(window::FocusTracker::default())
         .manage(security::UserGrants::default())
+        .manage(deep_link::PendingOpenedFiles::default())
         // Files dragged from the Finder/Explorer onto any window reach the web
         // layer as bridge events, with their paths granted for the session.
         .on_window_event(|window, event| {
@@ -242,6 +243,12 @@ fn main() {
                 deep_link::handle(&deep_link_app, event.urls());
             });
 
+            // Files from outside the app: a double-click on an associated
+            // type. Windows and Linux pass them as launch arguments; macOS
+            // raises RunEvent::Opened instead, handled in run() below.
+            #[cfg(not(target_os = "macos"))]
+            deep_link::handle_files(&app_handle, deep_link::paths_from_args(std::env::args()));
+
             // Set up the system tray icon
             if let Err(e) = tray::setup_tray(&app_handle) {
                 log::warn!("Could not set up system tray: {}", e);
@@ -277,6 +284,18 @@ fn main() {
 
                 let pm = app_handle.state::<process_manager::ProcessManager>();
                 tauri::async_runtime::block_on(pm.kill_all());
+            }
+
+            // macOS delivers associated files as an event — at launch or into
+            // the running app. Other platforms pass them as arguments instead,
+            // handled at setup.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Opened { urls } = &event {
+                let files: Vec<std::path::PathBuf> = urls
+                    .iter()
+                    .filter_map(|url| url.to_file_path().ok())
+                    .collect();
+                deep_link::handle_files(app_handle, files);
             }
         });
 }

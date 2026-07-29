@@ -226,7 +226,11 @@ describe("TurboDesktop.sendBridgeMessage", () => {
 
     const result = await window.TurboDesktop.sendBridgeMessage("notification", "show", { title: "Hello" });
 
-    const bridgeCall = calls.find((c) => c.cmd === "handle_bridge_message");
+    // The script also sends its own startup messages (e.g. draining files the
+    // OS asked the app to open), so look for this call rather than the first.
+    const bridgeCall = calls.find(
+      (c) => c.cmd === "handle_bridge_message" && c.args.message.component === "notification"
+    );
     assert.ok(bridgeCall);
     assertDeepEqual(bridgeCall.args.message, {
       component: "notification",
@@ -330,7 +334,9 @@ describe("BridgeComponent", () => {
     const instance = new TestComponent(el);
     const result = await instance.send("activate", { color: "red" });
 
-    const bridgeCall = calls.find((c) => c.cmd === "handle_bridge_message");
+    const bridgeCall = calls.find(
+      (c) => c.cmd === "handle_bridge_message" && c.args.message.component === "test-widget"
+    );
     assert.ok(bridgeCall);
     assert.strictEqual(bridgeCall.args.message.component, "test-widget");
     assert.strictEqual(bridgeCall.args.message.event, "activate");

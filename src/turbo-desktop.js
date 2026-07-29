@@ -666,10 +666,41 @@
       case "visit":
         performVisit(detail.url);
         break;
+      case "file-open-pending":
+        drainOpenedFiles();
+        break;
       default:
         console.debug("[turbo-desktop] Ignoring unknown message:", kind);
     }
   };
+
+  /**
+   * Collect files the OS asked the app to open (double-click on an associated
+   * type, "Open With…"), announced as a turbo-desktop:file-open DOM event.
+   *
+   * Pull rather than push: launching by double-click queues the file in the
+   * shell before any page exists, so the page asks — on its own startup, and
+   * again whenever the shell pings a running page.
+   */
+  async function drainOpenedFiles() {
+    try {
+      const result = await TurboDesktop.sendBridgeMessage(
+        "file-open",
+        "pending",
+        {}
+      );
+      const paths = result && result.paths;
+      if (Array.isArray(paths) && paths.length > 0) {
+        document.dispatchEvent(
+          new CustomEvent("turbo-desktop:file-open", { detail: { paths } })
+        );
+      }
+    } catch (_e) {
+      // Not running inside the shell, or the bridge is not ready.
+    }
+  }
+
+  drainOpenedFiles();
 
   /**
    * True when someone is part-way through entering something.
