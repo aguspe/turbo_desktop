@@ -256,6 +256,74 @@ pub fn allowed_roots(app_data_dir: Option<PathBuf>, config: &FilesystemConfig) -
         .collect()
 }
 
+/// Paths the user has handed to the app through a native dialog this session.
+///
+/// A file the user picks in an open/save dialog is explicit consent for that
+/// path, so it does not also need to be inside `allowed_roots` — requiring
+/// that would force apps to allowlist the whole home directory to make
+/// "Save As…" work. Picking a file grants that one path; picking a folder
+/// grants its subtree. Grants live in memory only, so consent ends with the
+/// session.
+#[derive(Default)]
+pub struct UserGrants(std::sync::Mutex<Vec<Grant>>);
+
+struct Grant {
+    path: PathBuf,
+    subtree: bool,
+}
+
+impl UserGrants {
+    /// Record a file the user picked in a dialog.
+    pub fn grant_file(&self, path: &str) {
+        self.push(path, false);
+    }
+
+    /// Record a folder the user picked in a dialog, covering everything in it.
+    pub fn grant_folder(&self, path: &str) {
+        self.push(path, true);
+    }
+
+    fn push(&self, path: &str, subtree: bool) {
+        let normalized = canonicalize_existing_prefix(&lexical_normalize(Path::new(path)));
+        self.0.lock().unwrap().push(Grant {
+            path: normalized,
+            subtree,
+        });
+    }
+
+    fn allows(&self, resolved: &Path) -> bool {
+        self.0.lock().unwrap().iter().any(|grant| {
+            resolved == grant.path || (grant.subtree && resolved.starts_with(&grant.path))
+        })
+    }
+}
+
+/// Like [`resolve_in_scope`], but a path the user granted through a dialog is
+/// also allowed. The protected-location denials still apply — a grant widens
+/// where the app may go, never past what is denied outright.
+pub fn resolve_with_grants(
+    raw: &str,
+    roots: &[PathBuf],
+    grants: &UserGrants,
+) -> Result<PathBuf, String> {
+    let refused = match resolve_in_scope(raw, roots) {
+        Ok(path) => return Ok(path),
+        Err(e) => e,
+    };
+
+    let expanded = expand_tilde(raw).filter(|p| p.is_absolute());
+    let Some(expanded) = expanded else {
+        return Err(refused);
+    };
+
+    let resolved = canonicalize_existing_prefix(&lexical_normalize(&expanded));
+    if !is_denied(&resolved) && grants.allows(&resolved) {
+        Ok(resolved)
+    } else {
+        Err(refused)
+    }
+}
+
 /// Decide whether a command may run with administrator privileges.
 ///
 /// Sudo is off unless the app turns it on and names the commands it needs.
@@ -503,6 +571,82 @@ mod tests {
         let err = resolve_in_scope("/tmp/anything", &[])
             .expect_err("an empty root list should refuse everything");
         assert!(err.contains("no allowed roots"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn a_dialog_picked_file_is_reachable_outside_the_roots() {
+        let dir = std::env::temp_dir().join("turbo-desktop-grant-file");
+        std::fs::create_dir_all(&dir).unwrap();
+        let picked = dir.canonicalize().unwrap().join("report.csv");
+
+        let grants = UserGrants::default();
+        let roots = [PathBuf::from("/nonexistent-root")];
+
+        let raw = picked.to_string_lossy().to_string();
+        assert!(resolve_with_grants(&raw, &roots, &grants).is_err());
+
+        grants.grant_file(&raw);
+        let resolved =
+            resolve_with_grants(&raw, &roots, &grants).expect("a picked file should be reachable");
+        assert_eq!(resolved, picked);
+
+        // The grant covers that one file, not its siblings.
+        let sibling = dir.join("other.csv").to_string_lossy().to_string();
+        assert!(resolve_with_grants(&sibling, &roots, &grants).is_err());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_dialog_picked_folder_covers_its_subtree() {
+        let dir = std::env::temp_dir().join("turbo-desktop-grant-folder");
+        std::fs::create_dir_all(&dir).unwrap();
+        let folder = dir.canonicalize().unwrap();
+
+        let grants = UserGrants::default();
+        grants.grant_folder(&folder.to_string_lossy());
+
+        let inside = folder.join("nested").join("file.txt");
+        let resolved = resolve_with_grants(&inside.to_string_lossy(), &[], &grants)
+            .expect("a path inside the picked folder should be reachable");
+        assert_eq!(resolved, inside);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_grant_does_not_override_protected_locations() {
+        let dir = std::env::temp_dir().join("turbo-desktop-grant-denied");
+        std::fs::create_dir_all(&dir).unwrap();
+        let folder = dir.canonicalize().unwrap();
+
+        let grants = UserGrants::default();
+        grants.grant_folder(&folder.to_string_lossy());
+
+        let secret = folder.join(".ssh").join("id_rsa");
+        assert!(resolve_with_grants(&secret.to_string_lossy(), &[], &grants).is_err());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_grant_cannot_be_reached_by_traversal_from_a_root() {
+        // A granted path must match after normalization, so `root/../granted`
+        // resolves to the grant itself and is allowed, while unrelated
+        // traversal keeps failing.
+        let dir = std::env::temp_dir().join("turbo-desktop-grant-traversal");
+        std::fs::create_dir_all(&dir).unwrap();
+        let picked = dir.canonicalize().unwrap().join("picked.txt");
+
+        let grants = UserGrants::default();
+        grants.grant_file(&picked.to_string_lossy());
+
+        let dodged = dir.join("sub").join("..").join("picked.txt");
+        let resolved = resolve_with_grants(&dodged.to_string_lossy(), &[], &grants)
+            .expect("normalized path should match the grant");
+        assert_eq!(resolved, picked);
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

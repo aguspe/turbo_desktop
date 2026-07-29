@@ -134,6 +134,7 @@ async fn handle_file_picker(
     app: &tauri::AppHandle,
     message: &BridgeMessage,
 ) -> Result<serde_json::Value, String> {
+    use tauri::Manager;
     use tauri_plugin_dialog::DialogExt;
 
     let title = message.data["title"].as_str().unwrap_or("Select");
@@ -150,7 +151,12 @@ async fn handle_file_picker(
                 });
 
             match rx.await {
-                Ok(Some(path)) => Ok(serde_json::json!({ "status": "selected", "path": path })),
+                Ok(Some(path)) => {
+                    // Picking a folder is consent for everything in it.
+                    app.state::<crate::security::UserGrants>()
+                        .grant_folder(&path);
+                    Ok(serde_json::json!({ "status": "selected", "path": path }))
+                }
                 Ok(None) => Ok(serde_json::json!({ "status": "cancelled", "path": null })),
                 Err(e) => Err(format!("Dialog error: {}", e)),
             }
@@ -166,7 +172,11 @@ async fn handle_file_picker(
                 });
 
             match rx.await {
-                Ok(Some(path)) => Ok(serde_json::json!({ "status": "selected", "path": path })),
+                Ok(Some(path)) => {
+                    // Picking a file is consent for that file.
+                    app.state::<crate::security::UserGrants>().grant_file(&path);
+                    Ok(serde_json::json!({ "status": "selected", "path": path }))
+                }
                 Ok(None) => Ok(serde_json::json!({ "status": "cancelled", "path": null })),
                 Err(e) => Err(format!("Dialog error: {}", e)),
             }
@@ -182,7 +192,11 @@ async fn handle_file_picker(
                 });
 
             match rx.await {
-                Ok(Some(path)) => Ok(serde_json::json!({ "status": "selected", "path": path })),
+                Ok(Some(path)) => {
+                    // Choosing where to save is consent to write there.
+                    app.state::<crate::security::UserGrants>().grant_file(&path);
+                    Ok(serde_json::json!({ "status": "selected", "path": path }))
+                }
                 Ok(None) => Ok(serde_json::json!({ "status": "cancelled", "path": null })),
                 Err(e) => Err(format!("Dialog error: {}", e)),
             }

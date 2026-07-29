@@ -41,6 +41,7 @@ fn main() {
         .manage(process_manager::ProcessManager::new())
         .manage(window::LastWindowSize::default())
         .manage(window::FocusTracker::default())
+        .manage(security::UserGrants::default())
         // Inject turbo-desktop.js into every page load across all webviews.
         .on_page_load(|webview, payload| {
             if let PageLoadEvent::Finished = payload.event() {

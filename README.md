@@ -483,6 +483,12 @@ out of a root, and locations like `.ssh`, `.aws`, `.gnupg` and Rails
 }
 ```
 
+A path the user picks in a native file dialog is treated as consent for that
+path: picking a file (open or save) makes that one file readable and writable,
+picking a folder covers everything inside it. So "Save As… → Desktop" works
+without listing `~/Desktop` as a root. Grants last for the session only, and
+the protected locations above stay refused even when picked.
+
 **Sudo.** The `sudo` component is off unless you enable it and name the commands
 it may run. A command is matched whole or as a prefix up to a word boundary, and
 anything containing shell metacharacters (`;`, `&&`, `|`, backticks, `$(...)`)
