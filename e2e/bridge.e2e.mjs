@@ -172,19 +172,40 @@ test("a path nobody picked is still refused", async () => {
 });
 
 test("a shell command streams its output back", async () => {
-  const lines = await browser.executeAsync((done) => {
+  // Returns the whole observed state rather than just the lines, so a
+  // failure says which link broke: the event system, the spawn, or delivery.
+  const result = await browser.executeAsync((done) => {
     const td = window.__TURBO_DESKTOP__;
-    const seen = [];
+    const state = {
+      canListen: Boolean(window.__TAURI_INTERNALS__?.event?.listen),
+      spawn: null,
+      lines: [],
+      exit: null,
+      finishedBy: null,
+    };
+    const finish = (how) => {
+      state.finishedBy = how;
+      td.shell.offOutput("e2e-echo");
+      done(state);
+    };
+    const guard = setTimeout(() => finish("timeout"), 15000);
+
     td.shell.onOutput("e2e-echo", (message) => {
-      if (message.event === "stdout") seen.push(message.line);
+      if (message.event === "stdout") state.lines.push(message.line);
       if (message.event === "exit") {
-        td.shell.offOutput("e2e-echo");
-        done(seen);
+        state.exit = message.code;
+        clearTimeout(guard);
+        finish("exit-event");
       }
     });
-    td.shell.spawn("e2e-echo", "echo", ["hello-from-e2e"]).catch((e) =>
-      done(`error: ${e}`)
-    );
+    td.shell.spawn("e2e-echo", "echo", ["hello-from-e2e"]).then((r) => {
+      state.spawn = r;
+    });
   });
-  assert.deepStrictEqual(lines, ["hello-from-e2e"]);
+
+  const detail = JSON.stringify(result);
+  assert.strictEqual(result.canListen, true, detail);
+  assert.strictEqual(result.spawn?.status, "spawned", detail);
+  assert.deepStrictEqual(result.lines, ["hello-from-e2e"], detail);
+  assert.strictEqual(result.finishedBy, "exit-event", detail);
 });
