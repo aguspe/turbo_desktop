@@ -82,12 +82,89 @@ pub fn handle(app: &tauri::AppHandle, urls: Vec<url::Url>) {
     }
 }
 
+/// Files the OS asked the app to open, waiting for the page to collect them.
+///
+/// A file association launch usually happens before the page has loaded, so a
+/// pushed event would land in an empty webview. The paths queue here instead:
+/// the shell pings the page, and the page drains the queue through the bridge
+/// — on its own startup if the ping arrived too early.
+#[derive(Default)]
+pub struct PendingOpenedFiles(std::sync::Mutex<Vec<String>>);
+
+/// Handle files the OS handed to the app — a double-click on an associated
+/// type, "Open With…", or a file dropped on the app's icon.
+pub fn handle_files(app: &tauri::AppHandle, paths: Vec<std::path::PathBuf>) {
+    if paths.is_empty() {
+        return;
+    }
+
+    // Being asked to open a file is the same consent as picking it in a
+    // dialog, so the page can read what it was handed.
+    let grants = app.state::<crate::security::UserGrants>();
+    let mut opened: Vec<String> = Vec::new();
+    for path in &paths {
+        let raw = path.to_string_lossy().into_owned();
+        if path.is_dir() {
+            grants.grant_folder(&raw);
+        } else {
+            grants.grant_file(&raw);
+        }
+        log::info!("Opening from the OS: {}", raw);
+        opened.push(raw);
+    }
+
+    app.state::<PendingOpenedFiles>()
+        .0
+        .lock()
+        .unwrap()
+        .extend(opened);
+
+    // Ping a loaded page so it drains the queue now; a page that is not there
+    // yet misses the ping and drains on its own startup instead.
+    if let Some(window) = app.get_webview_window("main") {
+        crate::window::deliver_to_page(&window, "file-open-pending", &serde_json::json!({}));
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+/// Bridge handler: the page collects (and thereby clears) the queued files.
+pub fn drain_pending(app: &tauri::AppHandle) -> Vec<String> {
+    std::mem::take(&mut *app.state::<PendingOpenedFiles>().0.lock().unwrap())
+}
+
+/// The paths the OS launched the app with, on platforms where an associated
+/// file arrives as a plain argument (Windows and Linux; macOS uses an event).
+pub fn paths_from_args<I: Iterator<Item = String>>(args: I) -> Vec<std::path::PathBuf> {
+    args.skip(1)
+        .filter(|arg| !arg.starts_with('-'))
+        .map(std::path::PathBuf::from)
+        .filter(|path| path.exists())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn link(s: &str) -> url::Url {
         url::Url::parse(s).expect("test link should parse")
+    }
+
+    #[test]
+    fn only_existing_non_flag_arguments_are_opened_files() {
+        let file = std::env::temp_dir().join("turbo-desktop-assoc.txt");
+        std::fs::write(&file, "x").unwrap();
+
+        let args = vec![
+            "/usr/bin/app".to_string(),
+            "--flag".to_string(),
+            file.to_string_lossy().into_owned(),
+            "/nonexistent/other.txt".to_string(),
+        ];
+
+        assert_eq!(paths_from_args(args.into_iter()), vec![file.clone()]);
+        std::fs::remove_file(&file).ok();
     }
 
     #[test]

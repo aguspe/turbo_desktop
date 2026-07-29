@@ -571,6 +571,34 @@ async connect() {
 It is deliberately not a config key: registering login items silently is how
 apps end up on "why does this start with my computer" lists. Ask first.
 
+### Opening files with your app
+
+Declare the file types your app owns in `tauri.conf.json`, and the OS offers
+your app for them — double-click, "Open With…", drop on the dock icon:
+
+```json
+{
+  "bundle": {
+    "fileAssociations": [
+      { "ext": ["csv"], "description": "Data import", "role": "Viewer" }
+    ]
+  }
+}
+```
+
+Opened files arrive as a `turbo-desktop:file-open` DOM event with
+`event.detail.paths`, whether the app was already running or was launched by
+the double-click — a launch queues the paths until your page is up. Like a
+dialog pick, being asked to open a file grants it for reading through the
+filesystem bridge.
+
+```js
+// data-action="turbo-desktop:file-open@document->importer#fileOpened"
+async fileOpened(event) {
+  const { content } = await TurboDesktop.fs.read(event.detail.paths[0]);
+}
+```
+
 ### Dev Inspector
 
 In development, press **Cmd/Ctrl+Shift+D** to open the Dev Inspector — an in-app
