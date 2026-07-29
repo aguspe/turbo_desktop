@@ -48,9 +48,9 @@ pub fn working_directory(config: &ServerConfig, config_dir: Option<&Path>) -> Op
 
 /// Start the configured server and hand it to ProcessManager.
 ///
-/// Run through a login shell because starting a Rails app usually depends on a
-/// version manager that only sets itself up in a configured shell — the same
-/// reason the shell bridge does it.
+/// The command runs the way the platform runs commands — through a login shell
+/// on Unix (a version manager only sets itself up in a configured shell),
+/// through `cmd` on Windows. See [`crate::shell_bridge::shell_invocation`].
 pub async fn start(
     app: &tauri::AppHandle,
     config: &ServerConfig,
@@ -65,12 +65,10 @@ pub async fn start(
     };
     let directory = working_directory(config, config_dir);
 
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-    let mut spawner = tokio::process::Command::new(&shell);
+    let (program, args) = crate::shell_bridge::shell_invocation(command);
+    let mut spawner = tokio::process::Command::new(&program);
     spawner
-        .arg("-l")
-        .arg("-c")
-        .arg(command)
+        .args(&args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
