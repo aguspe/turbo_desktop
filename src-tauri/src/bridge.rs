@@ -243,3 +243,75 @@ async fn handle_shortcut(
         _ => Ok(serde_json::json!({ "status": "unknown_event" })),
     }
 }
+
+/// Forward a native drag-drop interaction to the web layer.
+///
+/// The webview's native handler owns file drags, so the page never sees the
+/// dropped files through HTML5 events — this hands it the paths instead.
+/// Dropping a file onto the app is the same consent as picking it in a
+/// dialog, so the paths are granted for the session before the event goes
+/// out. `Over` is not forwarded: it fires for every mouse move.
+pub fn handle_drag_drop(app: &tauri::AppHandle, event: &tauri::DragDropEvent) {
+    use tauri::DragDropEvent;
+    use tauri::Manager;
+
+    match event {
+        DragDropEvent::Enter { paths, position } => {
+            emit_drag_drop(app, "enter", drag_drop_payload(paths, Some(position)));
+        }
+        DragDropEvent::Drop { paths, position } => {
+            let grants = app.state::<crate::security::UserGrants>();
+            for path in paths {
+                let raw = path.to_string_lossy();
+                if path.is_dir() {
+                    grants.grant_folder(&raw);
+                } else {
+                    grants.grant_file(&raw);
+                }
+            }
+            emit_drag_drop(app, "drop", drag_drop_payload(paths, Some(position)));
+        }
+        DragDropEvent::Leave => {
+            emit_drag_drop(app, "leave", serde_json::json!({ "paths": [] }));
+        }
+        _ => {}
+    }
+}
+
+fn emit_drag_drop(app: &tauri::AppHandle, event: &str, data: serde_json::Value) {
+    let response = BridgeResponse {
+        component: "drag-drop".to_string(),
+        event: event.to_string(),
+        data,
+    };
+    if let Err(e) = app.emit("bridge-response", &response) {
+        log::warn!("Drag-drop: failed to emit '{}': {}", event, e);
+    }
+}
+
+fn drag_drop_payload(
+    paths: &[std::path::PathBuf],
+    position: Option<&tauri::PhysicalPosition<f64>>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "paths": paths.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>(),
+        "position": position.map(|p| serde_json::json!({ "x": p.x, "y": p.y })),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_drop_payload_carries_paths_and_position() {
+        let paths = vec![std::path::PathBuf::from("/tmp/report.csv")];
+        let position = tauri::PhysicalPosition { x: 10.0, y: 20.0 };
+
+        let payload = drag_drop_payload(&paths, Some(&position));
+
+        assert_eq!(payload["paths"][0], "/tmp/report.csv");
+        assert_eq!(payload["position"]["x"], 10.0);
+        assert_eq!(payload["position"]["y"], 20.0);
+    }
+}

@@ -514,6 +514,27 @@ it arrives in full when the command finishes.
 
 Set `confirm` to `false` only if your app already asks the user itself.
 
+### Drag & drop from the desktop
+
+Files dragged from the Finder or Explorer onto any app window reach your page
+with their real paths — something a browser never gives you. The drop counts as
+consent, like a dialog pick: the dropped files (and folders, with their
+contents) become readable through the filesystem bridge for the session.
+
+Subscribe from a Stimulus controller with plain DOM events:
+
+```js
+// data-action="turbo-desktop:drop@document->importer#filesDropped"
+filesDropped(event) {
+  const { paths, position } = event.detail;
+  paths.forEach((path) => TurboDesktop.fs.read(path));
+}
+```
+
+`turbo-desktop:drag-enter` and `turbo-desktop:drag-leave` fire around it for
+hover styling, or use the callback API: `TurboDesktop.dragDrop.onDrop(cb)`,
+`.onEnter(cb)`, `.onLeave(cb)`.
+
 ### Dev Inspector
 
 In development, press **Cmd/Ctrl+Shift+D** to open the Dev Inspector — an in-app
