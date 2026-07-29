@@ -359,6 +359,28 @@
         );
       },
     },
+
+    // ─── Clipboard API ───────────────────────────────────────────────────────
+    //
+    // The system clipboard, beyond what the webview can do itself: read what
+    // another application put there, write without a user gesture.
+
+    clipboard: {
+      async readText() {
+        const result = await TurboDesktop.sendBridgeMessage(
+          "clipboard",
+          "read-text",
+          {}
+        );
+        return result ? result.text : null;
+      },
+
+      async writeText(text) {
+        return TurboDesktop.sendBridgeMessage("clipboard", "write-text", {
+          text,
+        });
+      },
+    },
   };
 
   // Surface drag-drop as DOM events so a Stimulus controller can subscribe
