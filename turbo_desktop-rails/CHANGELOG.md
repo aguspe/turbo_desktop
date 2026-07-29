@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1 (2026-07-29)
+
+Version aligned with the desktop shell's 0.2.1 release, which fixes bridge
+events (shell/sudo output streaming, drag & drop, component onReceive) never
+reaching pages loaded from the app server. No gem-side API changes.
+
 ## 0.2.0 (2026-07-29)
 
 Version aligned with the desktop shell's 0.2.0 release (server auto-start,

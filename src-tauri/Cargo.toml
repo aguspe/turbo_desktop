@@ -1,6 +1,6 @@
 [package]
 name = "turbo-desktop"
-version = "0.2.0"
+version = "0.2.1"
 description = "Turbo Native for Desktop — native shell for Rails/Turbo apps"
 authors = ["RaiderHQ"]
 license = "MIT"

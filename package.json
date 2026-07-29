@@ -1,6 +1,6 @@
 {
   "name": "turbo-desktop",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Turbo Native for Desktop \u2014 wrap your Rails/Turbo app in a native desktop shell",
   "author": "RaiderHQ",
   "license": "MIT",
