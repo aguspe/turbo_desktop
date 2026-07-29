@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicedayfor/tauri/dev/crates/tauri-config-schema/schema.json",
   "productName": "Turbo Desktop",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "identifier": "com.turbo-desktop.app",
   "build": {
     "frontendDist": "../src",
