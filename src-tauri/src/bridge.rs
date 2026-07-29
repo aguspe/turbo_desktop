@@ -150,6 +150,21 @@ async fn handle_file_picker(
 
     let title = message.data["title"].as_str().unwrap_or("Select");
 
+    // E2E seam: WebDriver cannot click a native dialog, so a debug build can
+    // be told what the user would have picked. The grant matches what the
+    // real dialog would have recorded. A packaged (release) app ignores the
+    // variable entirely.
+    #[cfg(debug_assertions)]
+    if let Ok(path) = std::env::var("TURBO_DESKTOP_E2E_PICKER") {
+        let grants = app.state::<crate::security::UserGrants>();
+        match message.event.as_str() {
+            "open-folder" | "open_folder" => grants.grant_folder(&path),
+            _ => grants.grant_file(&path),
+        }
+        log::info!("File picker (e2e seam): {}", path);
+        return Ok(serde_json::json!({ "status": "selected", "path": path }));
+    }
+
     match message.event.as_str() {
         "open-folder" | "open_folder" => {
             let (tx, rx) = tokio::sync::oneshot::channel();

@@ -1,7 +1,7 @@
 {
   "name": "turbo-desktop",
   "version": "0.2.0",
-  "description": "Turbo Native for Desktop — wrap your Rails/Turbo app in a native desktop shell",
+  "description": "Turbo Native for Desktop \u2014 wrap your Rails/Turbo app in a native desktop shell",
   "author": "RaiderHQ",
   "license": "MIT",
   "type": "module",
@@ -48,13 +48,15 @@
     "build": "cargo tauri build",
     "build:apple-silicon": "cargo tauri build --target aarch64-apple-darwin",
     "test": "node --test",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test:e2e": "node --test e2e/bridge.e2e.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@tauri-apps/cli": "^2.0.0",
     "eslint": "^10.8.0",
-    "jsdom": "^29.0.1"
+    "jsdom": "^29.0.1",
+    "webdriverio": "^9.20.0"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0"

@@ -1,0 +1,22 @@
+{
+  "server_url": "http://localhost:3210",
+  "app_name": "E2E Fixture",
+  "window": {
+    "width": 900,
+    "height": 700,
+    "min_width": 400,
+    "min_height": 300,
+    "resizable": true
+  },
+  "filesystem": {
+    "allowed_roots": []
+  },
+  "sudo": {
+    "enabled": false,
+    "allowed_commands": [],
+    "confirm": true
+  },
+  "navigation": {
+    "internal_hosts": []
+  }
+}
