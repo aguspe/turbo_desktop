@@ -1,20 +1,23 @@
 use crate::bridge::{BridgeMessage, BridgeResponse};
 use crate::security;
 use crate::window::TurboDesktopConfig;
+use std::path::PathBuf;
+use std::process::Stdio;
 use tauri::{Emitter, Manager};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tokio::io::{AsyncBufReadExt, BufReader};
-use std::process::Stdio;
 
 /// Handle bridge messages for the "sudo" component.
 ///
-/// Executes commands with administrator privileges on macOS using
-/// `osascript` to prompt for the user's password via the system dialog.
+/// Executes commands with administrator privileges, prompting through the
+/// platform's own elevation UI: `osascript` on macOS, `pkexec` (polkit) on
+/// Linux, UAC via PowerShell on Windows.
 ///
 /// The bridge is disabled unless `turbo-desktop.config.json` enables it and
-/// lists the permitted commands. The macOS password prompt never shows what is
-/// about to run — and caches the credential afterwards — so an app-level
-/// confirmation naming the command runs first unless it is turned off.
+/// lists the permitted commands. The system's elevation prompt never shows
+/// what is about to run — and may cache the credential afterwards — so an
+/// app-level confirmation naming the command runs first unless it is turned
+/// off.
 ///
 /// Events:
 ///   - "execute": Run a command with admin privileges (blocking, returns output)
@@ -74,7 +77,6 @@ fn cancelled() -> serde_json::Value {
 }
 
 /// Execute a command with admin privileges and return the full output.
-/// Uses macOS `osascript` to prompt for password.
 async fn handle_execute(
     app: &tauri::AppHandle,
     message: &BridgeMessage,
@@ -87,27 +89,22 @@ async fn handle_execute(
         return Ok(cancelled());
     }
 
-    let script = build_osascript_command(command);
+    let mut elevated = elevated_command(command)?;
 
-    let output = tokio::process::Command::new("osascript")
-        .arg("-e")
-        .arg(&script)
+    let output = elevated
+        .command
         .output()
         .await
-        .map_err(|e| format!("Failed to run osascript: {}", e))?;
+        .map_err(|e| format!("Failed to run the elevation helper: {}", e));
+    remove_temp_files(&elevated.temp_files);
+    let output = output?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let code = output.status.code();
 
-    // osascript returns error code -128 when the user cancels the dialog
-    if stderr.contains("-128") || stderr.contains("User canceled") {
-        return Ok(serde_json::json!({
-            "status": "cancelled",
-            "stdout": "",
-            "stderr": "",
-            "code": -128,
-        }));
+    if user_cancelled(code, &stderr) {
+        return Ok(cancelled());
     }
 
     Ok(serde_json::json!({
@@ -119,7 +116,10 @@ async fn handle_execute(
 }
 
 /// Spawn a command with admin privileges and stream output back.
-/// Unlike the shell bridge, this wraps the command in osascript for privilege escalation.
+///
+/// On macOS and Linux the lines arrive as the command produces them. On
+/// Windows an elevated child cannot write to a non-elevated parent's pipes,
+/// so the output is captured to files and streamed once the command finishes.
 async fn handle_spawn(
     app: &tauri::AppHandle,
     message: &BridgeMessage,
@@ -137,23 +137,30 @@ async fn handle_spawn(
         return Ok(serde_json::json!({ "status": "cancelled", "id": id }));
     }
 
-    let script = build_osascript_command(&command);
+    let mut elevated = elevated_command(&command)?;
 
-    let mut child = tokio::process::Command::new("osascript")
-        .arg("-e")
-        .arg(&script)
+    let spawned = elevated
+        .command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("Failed to spawn osascript: {}", e))?;
+        .spawn();
+    let mut child = match spawned {
+        Ok(child) => child,
+        Err(e) => {
+            remove_temp_files(&elevated.temp_files);
+            return Err(format!("Failed to spawn the elevation helper: {}", e));
+        }
+    };
 
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
 
     let app_handle = app.clone();
     let task_id = id.clone();
+    let temp_files = elevated.temp_files;
     tauri::async_runtime::spawn(async move {
         stream_sudo_output(app_handle, task_id, child, stdout, stderr).await;
+        remove_temp_files(&temp_files);
     });
 
     log::info!("Sudo: spawned privileged command with id '{}'", id);
@@ -231,17 +238,221 @@ fn emit_sudo_event(app: &tauri::AppHandle, id: &str, event: &str, data: serde_js
     }
 }
 
+/// A process that runs the command elevated, plus any temp files that must be
+/// removed once it has finished.
+struct ElevatedCommand {
+    command: tokio::process::Command,
+    /// Only Windows uses these — see the Windows `elevated_command`.
+    temp_files: Vec<PathBuf>,
+}
+
+fn remove_temp_files(files: &[PathBuf]) {
+    for file in files {
+        let _ = std::fs::remove_file(file);
+    }
+}
+
+/// macOS: AppleScript's `do shell script … with administrator privileges`,
+/// which triggers the system password dialog. Output flows through
+/// osascript's own stdout/stderr.
+#[cfg(target_os = "macos")]
+fn elevated_command(command: &str) -> Result<ElevatedCommand, String> {
+    let mut cmd = tokio::process::Command::new("osascript");
+    cmd.arg("-e").arg(build_osascript_command(command));
+    Ok(ElevatedCommand {
+        command: cmd,
+        temp_files: Vec::new(),
+    })
+}
+
 /// Build the osascript command string for privileged execution.
-///
-/// Uses AppleScript's `do shell script` with `administrator privileges`
-/// which triggers the macOS password dialog.
+#[cfg(target_os = "macos")]
 fn build_osascript_command(command: &str) -> String {
     // Escape backslashes and double quotes for AppleScript string
-    let escaped = command
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"");
+    let escaped = command.replace('\\', "\\\\").replace('"', "\\\"");
     format!(
         "do shell script \"{}\" with administrator privileges",
         escaped
     )
+}
+
+/// Linux: `pkexec`, whose polkit agent shows the authentication dialog on
+/// every desktop distribution. The command goes through `sh -c` so a command
+/// line behaves the same as on the other platforms, and output flows through
+/// pkexec's own stdout/stderr. Exit 126 means the user dismissed the dialog.
+#[cfg(target_os = "linux")]
+fn elevated_command(command: &str) -> Result<ElevatedCommand, String> {
+    let mut cmd = tokio::process::Command::new("pkexec");
+    cmd.arg("sh").arg("-c").arg(command);
+    Ok(ElevatedCommand {
+        command: cmd,
+        temp_files: Vec::new(),
+    })
+}
+
+/// Windows: UAC via PowerShell's `Start-Process -Verb RunAs`.
+///
+/// An elevated child cannot inherit a non-elevated parent's pipes or
+/// environment, so the command is written verbatim into a batch file — no
+/// escaping to get wrong — which redirects its output to temp files. The
+/// PowerShell wrapper waits, prints those files to its own stdout/stderr, and
+/// forwards the exit code. A declined UAC prompt raises ERROR_CANCELLED,
+/// which the wrapper turns into exit 1223, the Windows code for it.
+#[cfg(windows)]
+fn elevated_command(command: &str) -> Result<ElevatedCommand, String> {
+    let (batch, out, err) = windows_temp_paths();
+
+    std::fs::write(&batch, windows_batch_script(command, &out, &err))
+        .map_err(|e| format!("Could not write the elevation batch file: {}", e))?;
+
+    let mut cmd = tokio::process::Command::new("powershell");
+    cmd.arg("-NoProfile")
+        .arg("-NonInteractive")
+        .arg("-Command")
+        .arg(windows_elevation_script(&batch, &out, &err));
+    Ok(ElevatedCommand {
+        command: cmd,
+        temp_files: vec![batch, out, err],
+    })
+}
+
+/// Unique sibling paths in the temp directory for one elevation run.
+#[cfg(windows)]
+fn windows_temp_paths() -> (PathBuf, PathBuf, PathBuf) {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    let base = std::env::temp_dir().join(format!(
+        "turbo-desktop-sudo-{}-{}",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    (
+        base.with_extension("cmd"),
+        base.with_extension("out"),
+        base.with_extension("err"),
+    )
+}
+
+#[cfg(windows)]
+fn windows_batch_script(command: &str, out: &std::path::Path, err: &std::path::Path) -> String {
+    format!(
+        "@echo off\r\n{} 1>\"{}\" 2>\"{}\"\r\n",
+        command,
+        out.display(),
+        err.display()
+    )
+}
+
+#[cfg(windows)]
+fn windows_elevation_script(
+    batch: &std::path::Path,
+    out: &std::path::Path,
+    err: &std::path::Path,
+) -> String {
+    format!(
+        "try {{ \
+           $p = Start-Process -FilePath '{}' -Verb RunAs -Wait -PassThru -WindowStyle Hidden; \
+           Get-Content -ErrorAction SilentlyContinue '{}' | Write-Output; \
+           Get-Content -ErrorAction SilentlyContinue '{}' | ForEach-Object {{ [Console]::Error.WriteLine($_) }}; \
+           exit $p.ExitCode \
+         }} catch {{ exit 1223 }}",
+        batch.display(),
+        out.display(),
+        err.display()
+    )
+}
+
+/// Whether the exit means the user declined the system's elevation prompt,
+/// which the bridge reports as a cancellation rather than a failure.
+fn user_cancelled(code: Option<i32>, stderr: &str) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        // osascript reports the dialog's cancel as error -128.
+        let _ = code;
+        stderr.contains("-128") || stderr.contains("User canceled")
+    }
+    #[cfg(target_os = "linux")]
+    {
+        // pkexec: 126 is "dialog dismissed"; the agent also says so on stderr.
+        code == Some(126) || stderr.contains("Request dismissed")
+    }
+    #[cfg(windows)]
+    {
+        // ERROR_CANCELLED, forwarded by the PowerShell wrapper.
+        let _ = stderr;
+        code == Some(1223)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_applescript_quotes_the_command() {
+        let script = build_osascript_command("echo \"hi\" C:\\path");
+        assert_eq!(
+            script,
+            "do shell script \"echo \\\"hi\\\" C:\\\\path\" with administrator privileges"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn elevation_runs_through_osascript() {
+        let elevated = elevated_command("softwareupdate -l").unwrap();
+        assert_eq!(elevated.command.as_std().get_program(), "osascript");
+        assert!(elevated.temp_files.is_empty());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn elevation_runs_through_pkexec() {
+        let elevated = elevated_command("apt-get update").unwrap();
+        let std = elevated.command.as_std();
+        assert_eq!(std.get_program(), "pkexec");
+        let args: Vec<_> = std.get_args().collect();
+        assert_eq!(args, ["sh", "-c", "apt-get update"]);
+        assert!(elevated.temp_files.is_empty());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn elevation_runs_through_a_uac_prompt() {
+        let elevated = elevated_command("ipconfig /flushdns").unwrap();
+        let std = elevated.command.as_std();
+        assert_eq!(std.get_program(), "powershell");
+        let script = std.get_args().last().unwrap().to_string_lossy().to_string();
+        assert!(script.contains("-Verb RunAs"));
+        assert!(script.contains("1223"));
+
+        // The command itself lives in the batch file, verbatim.
+        let [batch, _, _] = &elevated.temp_files[..] else {
+            panic!("expected batch, out and err temp files");
+        };
+        let contents = std::fs::read_to_string(batch).unwrap();
+        assert!(contents.contains("ipconfig /flushdns 1>"));
+        remove_temp_files(&elevated.temp_files);
+    }
+
+    #[test]
+    fn a_declined_prompt_reads_as_cancelled() {
+        #[cfg(target_os = "macos")]
+        assert!(user_cancelled(
+            Some(1),
+            "execution error: User canceled. (-128)"
+        ));
+        #[cfg(target_os = "linux")]
+        assert!(user_cancelled(Some(126), ""));
+        #[cfg(windows)]
+        assert!(user_cancelled(Some(1223), ""));
+    }
+
+    #[test]
+    fn an_ordinary_failure_is_not_a_cancellation() {
+        assert!(!user_cancelled(Some(1), "No such file or directory"));
+        assert!(!user_cancelled(Some(0), ""));
+    }
 }

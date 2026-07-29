@@ -487,8 +487,14 @@ out of a root, and locations like `.ssh`, `.aws`, `.gnupg` and Rails
 it may run. A command is matched whole or as a prefix up to a word boundary, and
 anything containing shell metacharacters (`;`, `&&`, `|`, backticks, `$(...)`)
 is refused so an allowed prefix cannot be extended into a second command. Before
-the system password prompt — which does not say what is about to run, and caches
-your credential afterwards — the app shows the exact command and asks.
+the system's own elevation prompt — which does not say what is about to run, and
+may cache your credential afterwards — the app shows the exact command and asks.
+
+Elevation goes through each platform's native mechanism: the macOS password
+dialog (`osascript`), polkit's authentication dialog on Linux (`pkexec`, present
+on every desktop distribution), and UAC on Windows. One platform difference: on
+Windows an elevated command's output cannot stream line-by-line into the app —
+it arrives in full when the command finishes.
 
 ```json
 {
