@@ -2,7 +2,7 @@ use crate::bridge::{BridgeMessage, BridgeResponse};
 use crate::process_manager::ProcessManager;
 use std::collections::HashMap;
 use std::process::Stdio;
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 /// Handle bridge messages for the "shell" component.
@@ -178,15 +178,15 @@ async fn stream_process(
     }
 }
 
-fn emit_shell_event(app: &tauri::AppHandle, id: &str, event: &str, data: serde_json::Value) {
-    let response = BridgeResponse {
-        component: "shell".to_string(),
-        event: event.to_string(),
-        data,
-    };
-    if let Err(e) = app.emit("bridge-response", &response) {
-        log::warn!("Shell: failed to emit event for '{}': {}", id, e);
-    }
+fn emit_shell_event(app: &tauri::AppHandle, _id: &str, event: &str, data: serde_json::Value) {
+    crate::bridge::broadcast_response(
+        app,
+        &BridgeResponse {
+            component: "shell".to_string(),
+            event: event.to_string(),
+            data,
+        },
+    );
 }
 
 async fn handle_kill(

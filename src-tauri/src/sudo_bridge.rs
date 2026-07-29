@@ -3,7 +3,7 @@ use crate::security;
 use crate::window::TurboDesktopConfig;
 use std::path::PathBuf;
 use std::process::Stdio;
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
@@ -227,15 +227,15 @@ async fn stream_sudo_output(
     }
 }
 
-fn emit_sudo_event(app: &tauri::AppHandle, id: &str, event: &str, data: serde_json::Value) {
-    let response = BridgeResponse {
-        component: "sudo".to_string(),
-        event: event.to_string(),
-        data,
-    };
-    if let Err(e) = app.emit("bridge-response", &response) {
-        log::warn!("Sudo: failed to emit event for '{}': {}", id, e);
-    }
+fn emit_sudo_event(app: &tauri::AppHandle, _id: &str, event: &str, data: serde_json::Value) {
+    crate::bridge::broadcast_response(
+        app,
+        &BridgeResponse {
+            component: "sudo".to_string(),
+            event: event.to_string(),
+            data,
+        },
+    );
 }
 
 /// A process that runs the command elevated, plus any temp files that must be

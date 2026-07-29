@@ -91,10 +91,21 @@ pub async fn send_bridge_response(
 ) -> Result<(), String> {
     ensure_trusted_caller(&app, &webview)?;
 
-    // Emit to all windows — the JS side filters by component
-    app.emit("bridge-response", &response)
-        .map_err(|e| format!("{}", e))?;
+    broadcast_response(&app, &response);
     Ok(())
+}
+
+/// Hand a response to every open page — the JS side filters by component.
+///
+/// Not Tauri's event API: that is not exposed to pages loaded from a remote
+/// URL, which is what an app page always is, so `listen` never fires there.
+/// Responses travel over the same eval channel as everything else the shell
+/// tells the page.
+pub fn broadcast_response(app: &tauri::AppHandle, response: &BridgeResponse) {
+    match serde_json::to_value(response) {
+        Ok(payload) => crate::window::deliver_to_all(app, "bridge-response", &payload),
+        Err(e) => log::warn!("Bridge: could not serialize a response: {}", e),
+    }
 }
 
 // ─── Built-in Bridge Component Handlers ─────────────────────────────────────
@@ -149,6 +160,21 @@ async fn handle_file_picker(
     use tauri_plugin_dialog::DialogExt;
 
     let title = message.data["title"].as_str().unwrap_or("Select");
+
+    // E2E seam: WebDriver cannot click a native dialog, so a debug build can
+    // be told what the user would have picked. The grant matches what the
+    // real dialog would have recorded. A packaged (release) app ignores the
+    // variable entirely.
+    #[cfg(debug_assertions)]
+    if let Ok(path) = std::env::var("TURBO_DESKTOP_E2E_PICKER") {
+        let grants = app.state::<crate::security::UserGrants>();
+        match message.event.as_str() {
+            "open-folder" | "open_folder" => grants.grant_folder(&path),
+            _ => grants.grant_file(&path),
+        }
+        log::info!("File picker (e2e seam): {}", path);
+        return Ok(serde_json::json!({ "status": "selected", "path": path }));
+    }
 
     match message.event.as_str() {
         "open-folder" | "open_folder" => {
@@ -290,14 +316,14 @@ pub fn handle_drag_drop(app: &tauri::AppHandle, event: &tauri::DragDropEvent) {
 }
 
 fn emit_drag_drop(app: &tauri::AppHandle, event: &str, data: serde_json::Value) {
-    let response = BridgeResponse {
-        component: "drag-drop".to_string(),
-        event: event.to_string(),
-        data,
-    };
-    if let Err(e) = app.emit("bridge-response", &response) {
-        log::warn!("Drag-drop: failed to emit '{}': {}", event, e);
-    }
+    broadcast_response(
+        app,
+        &BridgeResponse {
+            component: "drag-drop".to_string(),
+            event: event.to_string(),
+            data,
+        },
+    );
 }
 
 fn drag_drop_payload(

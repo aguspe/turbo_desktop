@@ -73,4 +73,14 @@ export default [
       globals: browserGlobals,
     },
   },
+  {
+    // The e2e suite is a Node process whose execute() callbacks run in the
+    // app's webview, so it legitimately uses both worlds' globals.
+    files: ["e2e/**/*.mjs"],
+    languageOptions: {
+      ecmaVersion: 2023,
+      sourceType: "module",
+      globals: { ...nodeGlobals, ...browserGlobals },
+    },
+  },
 ];

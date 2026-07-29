@@ -18,6 +18,25 @@
 
   const INVOKE = window.__TAURI_INTERNALS__?.invoke;
 
+  // Native → page events. Tauri's own event API is not exposed to pages
+  // loaded from a remote URL — which an app page always is — so the shell
+  // delivers responses through __receive and this fans them out. Handlers
+  // get the same `{ payload }` shape Tauri's `listen` would have given them.
+  const bridgeResponseHandlers = new Set();
+  function onBridgeResponse(handler) {
+    bridgeResponseHandlers.add(handler);
+    return () => bridgeResponseHandlers.delete(handler);
+  }
+  function dispatchBridgeResponse(payload) {
+    bridgeResponseHandlers.forEach((handler) => {
+      try {
+        handler({ payload });
+      } catch (e) {
+        console.error("[turbo-desktop] A bridge-response handler failed:", e);
+      }
+    });
+  }
+
   // ─── Core API ──────────────────────────────────────────────────────────────
 
   const TurboDesktop = {
@@ -205,19 +224,13 @@
           }
         };
 
-        if (window.__TAURI_INTERNALS__?.event?.listen) {
-          const unlisten = window.__TAURI_INTERNALS__.event.listen(
-            "bridge-response",
-            handler
-          );
-          this._listeners.set(id, unlisten);
-        }
+        this._listeners.set(id, onBridgeResponse(handler));
       },
 
       offOutput(id) {
         const unlisten = this._listeners.get(id);
         if (unlisten) {
-          unlisten.then((fn) => fn());
+          unlisten();
           this._listeners.delete(id);
         }
       },
@@ -253,19 +266,13 @@
           }
         };
 
-        if (window.__TAURI_INTERNALS__?.event?.listen) {
-          const unlisten = window.__TAURI_INTERNALS__.event.listen(
-            "bridge-response",
-            handler
-          );
-          this._listeners.set(id, unlisten);
-        }
+        this._listeners.set(id, onBridgeResponse(handler));
       },
 
       offOutput(id) {
         const unlisten = this._listeners.get(id);
         if (unlisten) {
-          unlisten.then((fn) => fn());
+          unlisten();
           this._listeners.delete(id);
         }
       },
@@ -343,20 +350,16 @@
       },
 
       _listen(name, callback) {
-        if (!window.__TAURI_INTERNALS__?.event?.listen) return null;
-        return window.__TAURI_INTERNALS__.event.listen(
-          "bridge-response",
-          (event) => {
-            const payload = event.payload;
-            if (
-              payload &&
-              payload.component === "drag-drop" &&
-              payload.event === name
-            ) {
-              callback(payload.data);
-            }
+        return onBridgeResponse((event) => {
+          const payload = event.payload;
+          if (
+            payload &&
+            payload.component === "drag-drop" &&
+            payload.event === name
+          ) {
+            callback(payload.data);
           }
-        );
+        });
       },
     },
 
@@ -409,13 +412,13 @@
 
   // Surface drag-drop as DOM events so a Stimulus controller can subscribe
   // with a plain action instead of the TurboDesktop API.
-  if (window.__TAURI_INTERNALS__?.event?.listen) {
+  {
     const domEventNames = {
       enter: "turbo-desktop:drag-enter",
       drop: "turbo-desktop:drop",
       leave: "turbo-desktop:drag-leave",
     };
-    window.__TAURI_INTERNALS__.event.listen("bridge-response", (event) => {
+    onBridgeResponse((event) => {
       const payload = event.payload;
       const name = payload && payload.component === "drag-drop"
         ? domEventNames[payload.event]
@@ -513,15 +516,14 @@
 
     connect() {
       // Listen for responses from the native shell
-      if (window.__TAURI_INTERNALS__?.event?.listen) {
-        window.__TAURI_INTERNALS__.event.listen(
-          "bridge-response",
-          this._boundReceive
-        );
-      }
+      this._unlisten = onBridgeResponse(this._boundReceive);
     }
 
     disconnect() {
+      if (this._unlisten) {
+        this._unlisten();
+        this._unlisten = null;
+      }
       // Notify native side that this component is going away
       this.send("disconnect", {});
     }
@@ -714,6 +716,9 @@
         break;
       case "file-open-pending":
         drainOpenedFiles();
+        break;
+      case "bridge-response":
+        dispatchBridgeResponse(detail);
         break;
       default:
         console.debug("[turbo-desktop] Ignoring unknown message:", kind);
