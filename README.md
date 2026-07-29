@@ -535,6 +535,21 @@ filesDropped(event) {
 hover styling, or use the callback API: `TurboDesktop.dragDrop.onDrop(cb)`,
 `.onEnter(cb)`, `.onLeave(cb)`.
 
+### Clipboard
+
+The browser clipboard API needs a user gesture and a focused document; the
+native clipboard does not. `TurboDesktop.clipboard.readText()` returns what any
+application put there (`null` when it holds no text), and `.writeText(text)`
+sets it — from a Turbo Stream callback, a timer, wherever:
+
+```js
+const text = await TurboDesktop.clipboard.readText();
+await TurboDesktop.clipboard.writeText("INV-2024-001");
+```
+
+Ordinary copy and paste inside the page keeps working through the webview as
+in any browser.
+
 ### Dev Inspector
 
 In development, press **Cmd/Ctrl+Shift+D** to open the Dev Inspector — an in-app

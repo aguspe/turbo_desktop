@@ -61,6 +61,7 @@ pub async fn handle_bridge_message(
         "shell" => crate::shell_bridge::handle_shell(&app, &message).await,
         "filesystem" => crate::fs_bridge::handle_filesystem(&app, &message).await,
         "sudo" => crate::sudo_bridge::handle_sudo(&app, &message).await,
+        "clipboard" => handle_clipboard(&app, &message).await,
         "updater" => crate::updater_bridge::handle_updater(&app, &message).await,
         _ => {
             // Forward unknown components as events — allows user-defined bridge components
@@ -297,6 +298,34 @@ fn drag_drop_payload(
         "paths": paths.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>(),
         "position": position.map(|p| serde_json::json!({ "x": p.x, "y": p.y })),
     })
+}
+
+/// The system clipboard, for the cases the webview cannot reach: reading what
+/// another application put there, and writing without a user gesture. The
+/// webview's own copy/paste keeps working for everything else.
+async fn handle_clipboard(
+    app: &tauri::AppHandle,
+    message: &BridgeMessage,
+) -> Result<serde_json::Value, String> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+
+    match message.event.as_str() {
+        "read-text" | "read_text" => match app.clipboard().read_text() {
+            Ok(text) => Ok(serde_json::json!({ "status": "ok", "text": text })),
+            // An empty or non-text clipboard is a normal state, not a failure.
+            Err(_) => Ok(serde_json::json!({ "status": "ok", "text": null })),
+        },
+        "write-text" | "write_text" => {
+            let text = message.data["text"]
+                .as_str()
+                .ok_or("Missing 'text' in clipboard write")?;
+            app.clipboard()
+                .write_text(text.to_string())
+                .map_err(|e| format!("Could not write to the clipboard: {}", e))?;
+            Ok(serde_json::json!({ "status": "ok" }))
+        }
+        _ => Ok(serde_json::json!({ "status": "unknown_event" })),
+    }
 }
 
 #[cfg(test)]
