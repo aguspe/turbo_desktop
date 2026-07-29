@@ -404,6 +404,63 @@ describe("BridgeComponent", () => {
   });
 });
 
+// ─── Bridge response delivery ────────────────────────────────────────────
+
+describe("bridge-response delivery", () => {
+  // Tauri's event API is not exposed to remote pages, so responses arrive
+  // through __receive and fan out to the registered listeners.
+  it("reaches shell.onOutput through __receive", () => {
+    const { window } = createEnvironment();
+    const td = window.TurboDesktop;
+    const seen = [];
+
+    td.shell.onOutput("job-1", (message) => seen.push(message));
+    td.__receive("bridge-response", {
+      component: "shell",
+      event: "stdout",
+      data: { id: "job-1", line: "hi" },
+    });
+
+    assert.strictEqual(seen.length, 1);
+    assert.strictEqual(seen[0].event, "stdout");
+    assert.strictEqual(seen[0].line, "hi");
+
+    // Another job's output does not leak in.
+    td.__receive("bridge-response", {
+      component: "shell",
+      event: "stdout",
+      data: { id: "job-2", line: "not mine" },
+    });
+    assert.strictEqual(seen.length, 1);
+
+    // And unsubscribing stops delivery.
+    td.shell.offOutput("job-1");
+    td.__receive("bridge-response", {
+      component: "shell",
+      event: "stdout",
+      data: { id: "job-1", line: "after off" },
+    });
+    assert.strictEqual(seen.length, 1);
+  });
+
+  it("mirrors drag-drop responses as DOM events", () => {
+    const { window } = createEnvironment();
+    let detail = null;
+    window.document.addEventListener("turbo-desktop:drop", (e) => {
+      detail = e.detail;
+    });
+
+    window.TurboDesktop.__receive("bridge-response", {
+      component: "drag-drop",
+      event: "drop",
+      data: { paths: ["/tmp/a.csv"], position: { x: 1, y: 2 } },
+    });
+
+    assert.ok(detail, "the DOM event should have fired");
+    assert.deepStrictEqual(detail.paths, ["/tmp/a.csv"]);
+  });
+});
+
 // ─── stimulusBridge ──────────────────────────────────────────────────────
 
 describe("stimulusBridge", () => {

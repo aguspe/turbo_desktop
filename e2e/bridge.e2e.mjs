@@ -177,7 +177,6 @@ test("a shell command streams its output back", async () => {
   const result = await browser.executeAsync((done) => {
     const td = window.__TURBO_DESKTOP__;
     const state = {
-      canListen: Boolean(window.__TAURI_INTERNALS__?.event?.listen),
       spawn: null,
       lines: [],
       exit: null,
@@ -204,7 +203,6 @@ test("a shell command streams its output back", async () => {
   });
 
   const detail = JSON.stringify(result);
-  assert.strictEqual(result.canListen, true, detail);
   assert.strictEqual(result.spawn?.status, "spawned", detail);
   assert.deepStrictEqual(result.lines, ["hello-from-e2e"], detail);
   assert.strictEqual(result.finishedBy, "exit-event", detail);
