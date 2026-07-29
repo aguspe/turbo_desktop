@@ -381,6 +381,30 @@
         });
       },
     },
+
+    // ─── Autostart API ───────────────────────────────────────────────────────
+    //
+    // Launch-at-login, meant to be driven by a toggle in the app's own
+    // settings page rather than turned on silently.
+
+    autostart: {
+      async enable() {
+        return TurboDesktop.sendBridgeMessage("autostart", "enable", {});
+      },
+
+      async disable() {
+        return TurboDesktop.sendBridgeMessage("autostart", "disable", {});
+      },
+
+      async isEnabled() {
+        const result = await TurboDesktop.sendBridgeMessage(
+          "autostart",
+          "status",
+          {}
+        );
+        return Boolean(result && result.enabled);
+      },
+    },
   };
 
   // Surface drag-drop as DOM events so a Stimulus controller can subscribe

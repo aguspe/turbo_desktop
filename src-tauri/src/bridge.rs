@@ -62,6 +62,7 @@ pub async fn handle_bridge_message(
         "filesystem" => crate::fs_bridge::handle_filesystem(&app, &message).await,
         "sudo" => crate::sudo_bridge::handle_sudo(&app, &message).await,
         "clipboard" => handle_clipboard(&app, &message).await,
+        "autostart" => handle_autostart(&app, &message).await,
         "updater" => crate::updater_bridge::handle_updater(&app, &message).await,
         _ => {
             // Forward unknown components as events — allows user-defined bridge components
@@ -323,6 +324,43 @@ async fn handle_clipboard(
                 .write_text(text.to_string())
                 .map_err(|e| format!("Could not write to the clipboard: {}", e))?;
             Ok(serde_json::json!({ "status": "ok" }))
+        }
+        _ => Ok(serde_json::json!({ "status": "unknown_event" })),
+    }
+}
+
+/// Launch-at-login, driven by the app's own settings page.
+///
+/// Left to the user rather than the config: registering login items
+/// silently is how apps end up in "why does this start with my computer"
+/// lists. The app asks, the user decides, this records it with the OS
+/// (Launch Agent on macOS, registry Run key on Windows, XDG autostart
+/// entry on Linux).
+async fn handle_autostart(
+    app: &tauri::AppHandle,
+    message: &BridgeMessage,
+) -> Result<serde_json::Value, String> {
+    use tauri_plugin_autostart::ManagerExt;
+
+    let autolaunch = app.autolaunch();
+    match message.event.as_str() {
+        "enable" => {
+            autolaunch
+                .enable()
+                .map_err(|e| format!("Could not enable launch at login: {}", e))?;
+            Ok(serde_json::json!({ "status": "ok", "enabled": true }))
+        }
+        "disable" => {
+            autolaunch
+                .disable()
+                .map_err(|e| format!("Could not disable launch at login: {}", e))?;
+            Ok(serde_json::json!({ "status": "ok", "enabled": false }))
+        }
+        "status" => {
+            let enabled = autolaunch
+                .is_enabled()
+                .map_err(|e| format!("Could not read the launch-at-login state: {}", e))?;
+            Ok(serde_json::json!({ "status": "ok", "enabled": enabled }))
         }
         _ => Ok(serde_json::json!({ "status": "unknown_event" })),
     }
