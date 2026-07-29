@@ -63,11 +63,9 @@ async fn handle_spawn(
         format!("{} {}", command, args.iter().map(|a| shell_escape(a)).collect::<Vec<_>>().join(" "))
     };
 
-    let user_shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-    let mut cmd = tokio::process::Command::new(&user_shell);
-    cmd.arg("-l")
-        .arg("-c")
-        .arg(&shell_command)
+    let (program, shell_args) = shell_invocation(&shell_command);
+    let mut cmd = tokio::process::Command::new(&program);
+    cmd.args(&shell_args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .envs(&env);
@@ -227,13 +225,101 @@ async fn handle_list(app: &tauri::AppHandle) -> Result<serde_json::Value, String
     serde_json::to_value(&processes).map_err(|e| format!("{}", e))
 }
 
+/// How to run a command line on this platform.
+///
+/// On Unix the command runs through the user's login shell, so a version
+/// manager (rbenv, nvm, mise) sets up PATH the same way it would in a
+/// terminal. Windows has no login-shell convention — PATH comes from the
+/// registry and is already present — so the command goes through `cmd /C`.
+pub fn shell_invocation(command: &str) -> (String, Vec<String>) {
+    #[cfg(windows)]
+    {
+        (
+            "cmd".to_string(),
+            vec!["/C".to_string(), command.to_string()],
+        )
+    }
+    #[cfg(not(windows))]
+    {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+        (
+            shell,
+            vec!["-l".to_string(), "-c".to_string(), command.to_string()],
+        )
+    }
+}
+
 /// Escape a string for safe inclusion in a shell command.
+#[cfg(not(windows))]
 fn shell_escape(s: &str) -> String {
     if s.is_empty() {
         return "''".to_string();
     }
-    if s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':' | '=' | '@')) {
+    if s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':' | '=' | '@'))
+    {
         return s.to_string();
     }
     format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// Escape for `cmd /C`: double quotes around anything with spaces or cmd
+/// metacharacters, with embedded quotes doubled. cmd has no single-quote
+/// syntax, so the Unix escaping above would pass the quotes to the program.
+#[cfg(windows)]
+fn shell_escape(s: &str) -> String {
+    if s.is_empty() {
+        return "\"\"".to_string();
+    }
+    if s.chars().all(|c| {
+        c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':' | '=' | '@' | '\\')
+    }) {
+        return s.to_string();
+    }
+    format!("\"{}\"", s.replace('"', "\"\""))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(not(windows))]
+    #[test]
+    fn commands_run_through_a_login_shell() {
+        let (program, args) = shell_invocation("bin/rails server");
+        assert_eq!(
+            program,
+            std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into())
+        );
+        assert_eq!(args, vec!["-l", "-c", "bin/rails server"]);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn commands_run_through_cmd() {
+        // No login shell on Windows: PATH is already there, and `sh -l -c`
+        // would need a shell that does not exist.
+        let (program, args) = shell_invocation("bin/rails server");
+        assert_eq!(program, "cmd");
+        assert_eq!(args, vec!["/C", "bin/rails server"]);
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn arguments_are_single_quoted_for_the_shell() {
+        assert_eq!(shell_escape("plain-arg.txt"), "plain-arg.txt");
+        assert_eq!(shell_escape("has space"), "'has space'");
+        assert_eq!(shell_escape("it's"), "'it'\\''s'");
+        assert_eq!(shell_escape(""), "''");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn arguments_are_double_quoted_for_cmd() {
+        assert_eq!(shell_escape("plain-arg.txt"), "plain-arg.txt");
+        assert_eq!(shell_escape(r"C:\Users\dev"), r"C:\Users\dev");
+        assert_eq!(shell_escape("has space"), "\"has space\"");
+        assert_eq!(shell_escape("say \"hi\""), "\"say \"\"hi\"\"\"");
+        assert_eq!(shell_escape(""), "\"\"");
+    }
 }
