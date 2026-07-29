@@ -750,6 +750,7 @@
     <h1><span class="gradient-text">Turbo Desktop</span></h1>
     <p class="tagline">Turbo Native for Desktop &mdash; wrap your Rails app in a native macOS / Windows / Linux shell powered by Tauri 2</p>
     <div class="badges">
+      <span class="badge accent">v0.2.1</span>
       <span class="badge accent">Tauri 2</span>
       <span class="badge">Turbo Drive</span>
       <span class="badge">Hotwire Native</span>
@@ -759,6 +760,7 @@
     </div>
     <div class="cta-buttons">
       <a href="#quickstart" class="btn btn-primary">Get Started</a>
+      <a href="https://github.com/aguspe/turbo_desktop/releases/latest" class="btn btn-secondary" target="_blank" rel="noopener">Download</a>
       <a href="https://github.com/aguspe/turbo_desktop" class="btn btn-secondary" target="_blank" rel="noopener">View on GitHub</a>
       <a href="https://rubygems.org/gems/turbo_desktop-rails" class="btn btn-secondary" target="_blank" rel="noopener">RubyGems</a>
     </div>
@@ -796,7 +798,32 @@
       <div class="card">
         <span class="card-icon">&#x1f4e1;</span>
         <h4>Bridge Components</h4>
-        <p>Five built-in native components: notifications, menu items, file pickers, dock badges, and keyboard shortcuts. Extensible via event forwarding.</p>
+        <p>A dozen built-in native components: notifications, menus, file pickers, filesystem, shell, sudo, clipboard, autostart, badges, shortcuts and more. Extensible via event forwarding.</p>
+      </div>
+      <div class="card">
+        <span class="card-icon">&#x1f680;</span>
+        <h4>Server Auto-Start</h4>
+        <p>Opening the app starts your Rails server too, through a login shell so rbenv/asdf/mise just work. A server you started yourself is left alone.</p>
+      </div>
+      <div class="card">
+        <span class="card-icon">&#x1f4c2;</span>
+        <h4>Files, With Consent</h4>
+        <p>The filesystem bridge is scoped to roots you declare &mdash; but a path the user picks in a dialog, drops on the window, or opens with the app is consent, and just works.</p>
+      </div>
+      <div class="card">
+        <span class="card-icon">&#x1fa82;</span>
+        <h4>Drag &amp; Drop + File Associations</h4>
+        <p>Dropped files arrive as DOM events with real paths. Declare file types and double-clicking a file opens your app with it &mdash; even from a cold start.</p>
+      </div>
+      <div class="card">
+        <span class="card-icon">&#x1f4cb;</span>
+        <h4>Clipboard &amp; Autostart</h4>
+        <p>Read what any application copied, write without a page gesture. Offer a launch-at-login toggle backed by the OS: Launch Agent, registry Run key, or XDG entry.</p>
+      </div>
+      <div class="card">
+        <span class="card-icon">&#x1f510;</span>
+        <h4>Privileged Commands</h4>
+        <p>An allowlisted sudo bridge elevating through each platform's own prompt: the macOS password dialog, polkit on Linux, UAC on Windows.</p>
       </div>
       <div class="card">
         <span class="card-icon">&#x1f4cb;</span>
@@ -827,15 +854,25 @@
 
     <h3>JavaScript API</h3>
     <p>The injected <code>window.TurboDesktop</code> object exposes the full native bridge:</p>
-    <pre><code>TurboDesktop.version          <span class="cm">// "0.1.0"</span>
-TurboDesktop.platform          <span class="cm">// "macos"</span>
+    <pre><code>TurboDesktop.version          <span class="cm">// "0.2.1"</span>
 TurboDesktop.isNative          <span class="cm">// true</span>
 TurboDesktop.<span class="fn">proposeVisit</span>(url, action)          <span class="cm">// Send visit to Rust shell</span>
 TurboDesktop.<span class="fn">setTitle</span>(title)                     <span class="cm">// Update window title bar</span>
 TurboDesktop.<span class="fn">sendBridgeMessage</span>(component, event, data) <span class="cm">// Bridge message</span>
 TurboDesktop.<span class="fn">getWindowInfo</span>()                     <span class="cm">// Window state (size, pos, scale)</span>
 TurboDesktop.<span class="fn">closeModal</span>(label)                   <span class="cm">// Close modal by label</span>
-TurboDesktop.<span class="fn">toggleDevTools</span>()                    <span class="cm">// Toggle inspector</span></code></pre>
+
+TurboDesktop.fs.<span class="fn">read</span>(path) / .<span class="fn">write</span>(path, content) <span class="cm">// Scoped filesystem</span>
+TurboDesktop.shell.<span class="fn">spawn</span>(id, cmd, args)           <span class="cm">// Child processes, streamed</span>
+TurboDesktop.sudo.<span class="fn">execute</span>(cmd)                    <span class="cm">// Allowlisted elevation</span>
+TurboDesktop.clipboard.<span class="fn">readText</span>() / .<span class="fn">writeText</span>(t) <span class="cm">// System clipboard</span>
+TurboDesktop.autostart.<span class="fn">enable</span>() / .<span class="fn">isEnabled</span>()    <span class="cm">// Launch at login</span>
+TurboDesktop.dragDrop.<span class="fn">onDrop</span>(cb)                  <span class="cm">// Files from the desktop</span></code></pre>
+    <p>
+      Dropped files and OS-opened files also arrive as plain DOM events —
+      <code>turbo-desktop:drop</code> and <code>turbo-desktop:file-open</code> —
+      so a Stimulus <code>data-action</code> is all a page needs.
+    </p>
   </div>
 </section>
 
@@ -906,7 +943,7 @@ TurboDesktop.<span class="fn">toggleDevTools</span>()                    <span c
           <div class="diagram-arrow" style="display:flex;flex-direction:column;font-size:1rem;line-height:1.3">&darr; invoke &nbsp; &uarr; emit</div>
           <div class="diagram-box native" style="width:100%">
             <div class="name">Rust Bridge Handlers</div>
-            <div class="detail">notification, menu-item, file-picker, badge, shortcut</div>
+            <div class="detail">notification, menu-item, file-picker, filesystem, shell, sudo, clipboard, autostart, file-open, badge, shortcut, updater</div>
           </div>
         </div>
       </div>
@@ -928,7 +965,7 @@ TurboDesktop.<span class="fn">toggleDevTools</span>()                    <span c
         <p>
           On launch, Rust reads <code>turbo-desktop.config.json</code> for your <code>server_url</code>
           (falls back to <code>localhost:3000</code>), sets a custom User-Agent
-          (<code>Turbo Desktop/0.1.0 (macOS; aarch64)</code>), and navigates the 1200&times;800 main window to your app.
+          (<code>Turbo Desktop/0.2.1 (macOS; aarch64)</code>), and navigates the 1200&times;800 main window to your app.
         </p>
         <pre><code><span class="cm">// main.rs &mdash; startup</span>
 <span class="kw">let</span> app_config = window::<span class="fn">load_config</span>(<span class="ty">None</span>);
@@ -1126,6 +1163,30 @@ document.<span class="fn">addEventListener</span>(<span class="st">"turbo:before
         <h4><code>shortcut</code></h4>
         <p>Register global keyboard shortcuts with accelerator strings (e.g., <code>Cmd+Shift+N</code>).</p>
       </div>
+      <div class="card">
+        <h4><code>filesystem</code></h4>
+        <p>Read, write, list, mkdir and remove — inside the roots you declare, plus any path the user granted through a dialog, a drop or an OS file-open.</p>
+      </div>
+      <div class="card">
+        <h4><code>shell</code></h4>
+        <p>Spawn child processes through the user's login shell (version managers included), with stdout/stderr streamed back line by line.</p>
+      </div>
+      <div class="card">
+        <h4><code>sudo</code></h4>
+        <p>Run allowlisted commands elevated through the platform's own prompt: macOS password dialog, polkit on Linux, UAC on Windows.</p>
+      </div>
+      <div class="card">
+        <h4><code>clipboard</code></h4>
+        <p>The system clipboard past webview limits: read what any application copied, write without a user gesture.</p>
+      </div>
+      <div class="card">
+        <h4><code>autostart</code></h4>
+        <p>Launch at login, meant for a visible settings toggle — recorded with the OS, never enabled silently.</p>
+      </div>
+      <div class="card">
+        <h4><code>file-open</code></h4>
+        <p>Files the OS asked the app to open — double-click on an associated type, "Open With…", dock drop — queued through launch and drained by the page.</p>
+      </div>
     </div>
     <p style="margin-top:0.5rem">
       Unknown component names are automatically forwarded as <code>bridge-message</code> events, making the system fully extensible without modifying Rust code.
@@ -1192,7 +1253,7 @@ document.<span class="fn">addEventListener</span>(<span class="st">"turbo:before
   <div class="container">
     <h2><span class="gradient-text">Rails Gem</span></h2>
     <p class="lead">
-      <a href="https://rubygems.org/gems/turbo_desktop-rails"><code>turbo_desktop-rails</code></a> (v0.0.1 on RubyGems) gives your Rails app awareness of the desktop shell,
+      <a href="https://rubygems.org/gems/turbo_desktop-rails"><code>turbo_desktop-rails</code></a> (on RubyGems) gives your Rails app awareness of the desktop shell,
       exactly like <code><a href="https://github.com/hotwired/turbo-rails">turbo-rails</a></code> does for Turbo Native mobile apps.
     </p>
 
@@ -1205,7 +1266,7 @@ rails generate turbo_desktop:install</code></pre>
     <h3>Detection</h3>
     <p>
       Detects desktop app requests via the User-Agent header. The Tauri shell sends
-      <code>Turbo Desktop/0.1.0 (macOS; aarch64)</code>. The detection pattern is configurable.
+      <code>Turbo Desktop/0.2.1 (macOS; aarch64)</code>. The detection pattern is configurable.
     </p>
 
     <h3>View Helpers</h3>
@@ -1408,12 +1469,12 @@ npx turbo-desktop dev</code></pre>
           </tr>
           <tr>
             <td>Cross-platform</td>
-            <td>macOS today; Windows/Linux architecture ready</td>
+            <td>macOS, Windows, Linux &mdash; installers for all three on every release</td>
             <td>macOS, Windows, Linux</td>
           </tr>
           <tr>
             <td>Ecosystem maturity</td>
-            <td>New (v0.1.0)</td>
+            <td>New (v0.2.1)</td>
             <td>Mature (since 2013)</td>
           </tr>
           <tr class="highlight-row">
@@ -1599,7 +1660,7 @@ npm install</code></pre>
         <pre><code>{
   <span class="st">"server_url"</span>: <span class="st">"http://localhost:3000"</span>,
   <span class="st">"app_name"</span>: <span class="st">"My App"</span>,
-  <span class="st">"user_agent"</span>: <span class="st">"Turbo Desktop/0.1.0 (macOS; aarch64)"</span>,
+  <span class="st">"user_agent"</span>: <span class="st">"Turbo Desktop/0.2.1 (macOS; aarch64)"</span>,
   <span class="st">"window"</span>: { <span class="st">"width"</span>: <span class="nr">1200</span>, <span class="st">"height"</span>: <span class="nr">800</span> },
   <span class="st">"path_configuration_url"</span>: <span class="st">"http://localhost:3000/turbo-desktop/path-configuration.json"</span>
 }</code></pre>
@@ -1630,11 +1691,12 @@ rails generate turbo_desktop:install</code></pre>
       <div class="step-number">5</div>
       <div class="step-content">
         <h3>Run the desktop app</h3>
-        <pre><code><span class="cm"># Start your Rails server in one terminal</span>
-bin/rails server
-
-<span class="cm"># Start the Tauri desktop app in another</span>
-cargo tauri dev</code></pre>
+        <pre><code>cargo tauri dev</code></pre>
+        <p>
+          With <code>"server": { "command": "bin/rails server" }</code> in the
+          config, opening the app starts your Rails server too — one command,
+          not two terminals. A server you started yourself is left alone.
+        </p>
         <p>
           Your Rails app now runs inside a native desktop window with full
           <a href="https://turbo.hotwired.dev">Turbo Drive</a> integration,
