@@ -320,7 +320,65 @@
         });
       },
     },
+
+    // ─── Drag & Drop API ─────────────────────────────────────────────────────
+    //
+    // Files dragged from the Finder/Explorer arrive here with their real
+    // paths (the shell also grants them for reading, like a dialog pick).
+    // Also dispatched as DOM events for Stimulus actions:
+    //   turbo-desktop:drag-enter, turbo-desktop:drop, turbo-desktop:drag-leave
+    // with { paths, position } in event.detail.
+
+    dragDrop: {
+      onDrop(callback) {
+        return this._listen("drop", callback);
+      },
+
+      onEnter(callback) {
+        return this._listen("enter", callback);
+      },
+
+      onLeave(callback) {
+        return this._listen("leave", callback);
+      },
+
+      _listen(name, callback) {
+        if (!window.__TAURI_INTERNALS__?.event?.listen) return null;
+        return window.__TAURI_INTERNALS__.event.listen(
+          "bridge-response",
+          (event) => {
+            const payload = event.payload;
+            if (
+              payload &&
+              payload.component === "drag-drop" &&
+              payload.event === name
+            ) {
+              callback(payload.data);
+            }
+          }
+        );
+      },
+    },
   };
+
+  // Surface drag-drop as DOM events so a Stimulus controller can subscribe
+  // with a plain action instead of the TurboDesktop API.
+  if (window.__TAURI_INTERNALS__?.event?.listen) {
+    const domEventNames = {
+      enter: "turbo-desktop:drag-enter",
+      drop: "turbo-desktop:drop",
+      leave: "turbo-desktop:drag-leave",
+    };
+    window.__TAURI_INTERNALS__.event.listen("bridge-response", (event) => {
+      const payload = event.payload;
+      const name = payload && payload.component === "drag-drop"
+        ? domEventNames[payload.event]
+        : null;
+      if (name) {
+        document.dispatchEvent(new CustomEvent(name, { detail: payload.data }));
+      }
+    });
+  }
 
   // ─── Turbo Drive Integration ───────────────────────────────────────────────
 

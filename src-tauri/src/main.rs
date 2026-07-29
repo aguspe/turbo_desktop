@@ -42,6 +42,13 @@ fn main() {
         .manage(window::LastWindowSize::default())
         .manage(window::FocusTracker::default())
         .manage(security::UserGrants::default())
+        // Files dragged from the Finder/Explorer onto any window reach the web
+        // layer as bridge events, with their paths granted for the session.
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::DragDrop(drag) = event {
+                bridge::handle_drag_drop(window.app_handle(), drag);
+            }
+        })
         // Inject turbo-desktop.js into every page load across all webviews.
         .on_page_load(|webview, payload| {
             if let PageLoadEvent::Finished = payload.event() {
