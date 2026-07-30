@@ -784,7 +784,34 @@ document.<span class="fn">addEventListener</span>(<span class="st">"turbo:before
         <h4><code>shortcut</code></h4>
         <p>Register global keyboard shortcuts with accelerators.</p>
       </div>
+      <div class="card">
+        <h4><code>filesystem</code></h4>
+        <p>Read, write, list, mkdir and remove — inside the roots you declare, plus any path the user granted through a dialog, a drop or an OS file-open.</p>
+      </div>
+      <div class="card">
+        <h4><code>shell</code></h4>
+        <p>Spawn child processes through the user's login shell (version managers included), with stdout/stderr streamed back line by line.</p>
+      </div>
+      <div class="card">
+        <h4><code>sudo</code></h4>
+        <p>Run allowlisted commands elevated through the platform's own prompt: macOS password dialog, polkit on Linux, UAC on Windows.</p>
+      </div>
+      <div class="card">
+        <h4><code>clipboard</code></h4>
+        <p>The system clipboard past webview limits: read what any application copied, write without a user gesture.</p>
+      </div>
+      <div class="card">
+        <h4><code>autostart</code></h4>
+        <p>Launch at login, meant for a visible settings toggle — recorded with the OS, never enabled silently.</p>
+      </div>
+      <div class="card">
+        <h4><code>file-open</code></h4>
+        <p>Files the OS asked the app to open — double-click on an associated type, "Open With…", dock drop — queued through launch and drained by the page.</p>
+      </div>
     </div>
+    <p style="margin-top:0.5rem">
+      Unknown component names are automatically forwarded as <code>bridge-message</code> events, making the system fully extensible without modifying Rust code.
+    </p>
 
     <h3>JavaScript: Stimulus Bridge</h3>
     <div class="file-label">app/javascript/controllers/notification_bridge_controller.js</div>
@@ -854,7 +881,7 @@ document.<span class="fn">addEventListener</span>(<span class="st">"turbo:before
     <h3>Detection</h3>
     <p>
       The gem detects desktop app requests by inspecting the User-Agent header. The Tauri shell
-      sends a UA string like <code>Turbo Desktop/0.1.0 (macOS; aarch64)</code>.
+      sends a UA string like <code>Turbo Desktop/0.2.1 (macOS; aarch64)</code>.
     </p>
 
     <h3>View Helpers</h3>
@@ -920,7 +947,7 @@ document.<span class="fn">addEventListener</span>(<span class="st">"turbo:before
       <div class="step-number">1</div>
       <div class="step-content">
         <h3>Clone and install dependencies</h3>
-        <pre><code>git clone https://github.com/your-org/turbo_desktop.git
+        <pre><code>git clone https://github.com/aguspe/turbo_desktop.git
 cd turbo_desktop
 cargo install tauri-cli
 npm install</code></pre>
@@ -954,10 +981,10 @@ rails generate turbo_desktop:install</code></pre>
     <div class="step">
       <div class="step-number">4</div>
       <div class="step-content">
-        <h3>Serve path configuration from Rails</h3>
-        <p>Create a route that returns the path configuration JSON:</p>
+        <h3>Mount the path configuration endpoint</h3>
+        <p>The gem ships an engine that serves the path configuration JSON:</p>
         <pre><code><span class="cm"># config/routes.rb</span>
-get <span class="st">"/turbo-desktop/path-configuration"</span>, to: <span class="st">"turbo_desktop#path_configuration"</span></code></pre>
+mount TurboDesktop::Engine, at: <span class="st">"/turbo-desktop"</span></code></pre>
       </div>
     </div>
 
