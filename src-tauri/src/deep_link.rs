@@ -116,7 +116,7 @@ pub fn handle_files(app: &tauri::AppHandle, paths: Vec<std::path::PathBuf>) {
     app.state::<PendingOpenedFiles>()
         .0
         .lock()
-        .unwrap()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .extend(opened);
 
     // Ping a loaded page so it drains the queue now; a page that is not there
@@ -130,7 +130,13 @@ pub fn handle_files(app: &tauri::AppHandle, paths: Vec<std::path::PathBuf>) {
 
 /// Bridge handler: the page collects (and thereby clears) the queued files.
 pub fn drain_pending(app: &tauri::AppHandle) -> Vec<String> {
-    std::mem::take(&mut *app.state::<PendingOpenedFiles>().0.lock().unwrap())
+    std::mem::take(
+        &mut *app
+            .state::<PendingOpenedFiles>()
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    )
 }
 
 /// The paths the OS launched the app with, on platforms where an associated

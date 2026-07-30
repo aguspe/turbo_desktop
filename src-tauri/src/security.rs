@@ -285,16 +285,23 @@ impl UserGrants {
 
     fn push(&self, path: &str, subtree: bool) {
         let normalized = canonicalize_existing_prefix(&lexical_normalize(Path::new(path)));
-        self.0.lock().unwrap().push(Grant {
-            path: normalized,
-            subtree,
-        });
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(Grant {
+                path: normalized,
+                subtree,
+            });
     }
 
     fn allows(&self, resolved: &Path) -> bool {
-        self.0.lock().unwrap().iter().any(|grant| {
-            resolved == grant.path || (grant.subtree && resolved.starts_with(&grant.path))
-        })
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .any(|grant| {
+                resolved == grant.path || (grant.subtree && resolved.starts_with(&grant.path))
+            })
     }
 }
 

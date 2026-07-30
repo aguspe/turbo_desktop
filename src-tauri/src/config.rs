@@ -125,7 +125,10 @@ impl PathConfigurationStore {
     }
 
     pub fn set(&self, config: PathConfiguration) {
-        *self.compiled.write().unwrap() = compile(&config);
+        *self
+            .compiled
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = compile(&config);
     }
 
     /// Find the matching rule for a given URL path.
@@ -139,7 +142,12 @@ impl PathConfigurationStore {
             context: None,
         };
 
-        for rule in self.compiled.read().unwrap().iter() {
+        for rule in self
+            .compiled
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+        {
             if rule.patterns.iter().any(|re| re.is_match(path)) {
                 result = rule.properties.clone();
             }
