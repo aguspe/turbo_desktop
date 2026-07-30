@@ -103,7 +103,7 @@ end
 
 ## Requirements
 
-- Ruby >= 3.1.0
+- Ruby >= 3.3
 - Rails >= 7.0
 - turbo-rails >= 1.0
 
