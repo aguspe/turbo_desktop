@@ -3,7 +3,7 @@ require_relative "lib/turbo_desktop/version"
 Gem::Specification.new do |spec|
   spec.name          = "turbo_desktop-rails"
   spec.version       = TurboDesktop::VERSION
-  spec.authors       = [ "RaiderHQ" ]
+  spec.authors       = [ "aguspe" ]
   spec.email         = [ "hello@raiderhq.com" ]
 
   spec.summary       = "Turbo Native for Desktop — Rails integration"
