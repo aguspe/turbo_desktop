@@ -13,6 +13,7 @@ import {
   defaultBuildTarget,
   defaultUserAgent,
   extractIconFlag,
+  gemConstraint,
   guessAppName,
   packageVersion,
   run,
@@ -211,5 +212,31 @@ test("missing prerequisites stop before anything is created", () => {
     result.stderr,
     /at \w+ \(node:/,
     "a stack trace buries the thing the reader needs to see"
+  );
+});
+
+test("a scaffolded app pins the gem to the shell's minor version", () => {
+  assert.equal(gemConstraint("0.2.2"), "~> 0.2");
+  assert.equal(gemConstraint("1.4.0"), "~> 1.4");
+});
+
+test("the gem constraint follows package.json by default", () => {
+  const [major, minor] = packageVersion().split(".");
+
+  assert.equal(gemConstraint(), `~> ${major}.${minor}`);
+});
+
+test("the CLI carries no hard-coded gem constraint", () => {
+  const source = read("cli", "turbo-desktop.js");
+
+  assert.doesNotMatch(
+    source,
+    /turbo_desktop-rails["'],\s*["']~>\s*\d/,
+    "a literal constraint goes stale at the next minor release; use gemConstraint()"
+  );
+  assert.doesNotMatch(
+    source,
+    /turbo_desktop-rails['"],\s*path:/,
+    "the next-steps text should point at the published gem, not a local path"
   );
 });

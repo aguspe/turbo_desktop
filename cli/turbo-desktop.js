@@ -107,7 +107,7 @@ function cmdNew(args) {
     // Constrained on purpose. Unpinned, Bundler quietly resolves back to an
     // ancient version when the current one does not support the running Ruby,
     // and the failure only shows up later as a missing generator.
-    appendFileSync(gemfilePath, '\ngem "turbo_desktop-rails", "~> 0.1"\n');
+    appendFileSync(gemfilePath, `\ngem "turbo_desktop-rails", "${gemConstraint()}"\n`);
   }
 
   // Steps 3 and 4 run other people's tools against a Rails app that already
@@ -340,7 +340,7 @@ Turbo Desktop initialized successfully!
 
 Next steps:
   1. Add the gem to your Gemfile:
-     gem 'turbo_desktop-rails', path: '../turbo_desktop/turbo_desktop-rails'
+     gem "turbo_desktop-rails", "${gemConstraint()}"
 
   2. Mount the engine in config/routes.rb:
      mount TurboDesktop::Engine => "/turbo-desktop"
@@ -508,6 +508,18 @@ export function requireTool(command, message) {
 export function packageVersion() {
   const pkg = JSON.parse(readFileSync(join(PACKAGE_ROOT, "package.json"), "utf-8"));
   return pkg.version;
+}
+
+/**
+ * The constraint a scaffolded app's Gemfile gets for turbo_desktop-rails.
+ *
+ * The gem is released in step with the shell, so it follows the shell's own
+ * minor version. Written out by hand it went stale: "~> 0.1" does not admit
+ * any 0.2.x gem.
+ */
+export function gemConstraint(version = packageVersion()) {
+  const [major, minor] = version.split(".");
+  return `~> ${major}.${minor}`;
 }
 
 export function defaultUserAgent() {
