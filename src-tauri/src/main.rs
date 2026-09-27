@@ -77,6 +77,8 @@ fn main() {
             }
         })
         .setup(move |app| {
+            quit_when_asked_to_stop(app.handle().clone());
+
             // Under `tauri dev` the bundled pages come from a development
             // server rather than from the bundle. Its address is ours too.
             if let Some(dev_url) = app.config().build.dev_url.as_ref() {
@@ -352,6 +354,40 @@ pub fn open_externally(app: &tauri::AppHandle, url: &url::Url) {
         log::warn!("Could not open {}: {}", url, e);
     }
 }
+
+/// Quit properly when the process is told to stop.
+///
+/// Ctrl+C on `turbo-desktop dev`, a `kill`, or the terminal closing ends the
+/// process where it stands, and the server it started is left running with
+/// nothing to stop it. Quitting instead goes through the same exit as the
+/// Quit menu, which stops what the app started.
+#[cfg(unix)]
+fn quit_when_asked_to_stop(app: tauri::AppHandle) {
+    use tokio::signal::unix::{signal, SignalKind};
+
+    tauri::async_runtime::spawn(async move {
+        let (Ok(mut terminate), Ok(mut interrupt), Ok(mut hangup)) = (
+            signal(SignalKind::terminate()),
+            signal(SignalKind::interrupt()),
+            signal(SignalKind::hangup()),
+        ) else {
+            log::warn!("Could not listen for signals; a kill will not stop the app server");
+            return;
+        };
+
+        tokio::select! {
+            _ = terminate.recv() => {}
+            _ = interrupt.recv() => {}
+            _ = hangup.recv() => {}
+        }
+
+        log::info!("Asked to stop; quitting");
+        app.exit(0);
+    });
+}
+
+#[cfg(not(unix))]
+fn quit_when_asked_to_stop(_app: tauri::AppHandle) {}
 
 /// Where the path configuration comes from and where it goes.
 #[derive(Clone)]

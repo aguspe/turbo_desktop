@@ -10,7 +10,7 @@
 // bridge.e2e.mjs for why.
 import { test, before, after } from "node:test";
 import assert from "node:assert";
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
@@ -563,7 +563,9 @@ test("a page the server fails on is reported, and the banner clears on the next 
     "function",
   ]);
   // What the person sees is the server's own error page, which Turbo renders.
-  assert.equal(await browser.getTitle(), "Broken");
+  await waitFor(async () => (await browser.getTitle()) === "Broken", {
+    label: "the server's error page",
+  });
 
   await startOver();
   await click("to-tasks");
@@ -611,18 +613,19 @@ test("the app notices its server going away, and coming back", async () => {
 //
 // Last, because it ends the app.
 
-test("closing the app stops the server it started", async () => {
+test("quitting the app stops the server it started", { skip: process.platform === "win32" }, async () => {
   await startOver();
 
-  // The last window closing is how an app is quit here. Ending the WebDriver
-  // session instead kills the process outright, which is a crash, not a quit.
-  // With no window left there is no session either, which the driver reports
-  // as an error. It is what was asked for.
-  await browser.closeWindow().catch(() => {});
-  browser = null;
+  // Closing the last window over WebDriver kills the process outright, which
+  // is a crash, not a quit. Asking it to stop is what Ctrl+C on
+  // `turbo-desktop dev` does, and goes through the same exit as the Quit menu.
+  const pids = execFileSync("pgrep", ["-f", binary], { encoding: "utf-8" }).trim().split("\n");
+  assert.ok(pids.length > 0 && pids[0], "could not find the app's process");
+  for (const pid of pids) process.kill(Number(pid), "SIGTERM");
 
   await waitFor(async () => !(await serverAnswers()), {
-    label: `the server to stop (SHELL=${process.env.SHELL || "unset"})`,
+    label: "the server to stop",
     tries: 40,
   });
+  browser = null;
 });
