@@ -40,6 +40,18 @@ use tauri_plugin_deep_link::DeepLinkExt;
 /// How often to check that the app server is still answering.
 const PROBE_INTERVAL: Duration = Duration::from_secs(5);
 
+/// Import the Dev Inspector where the page asks for it, and hand it to the
+/// bridge to start.
+const LOAD_THE_INSPECTOR: &str = r#"(function () {
+  var bridge = window.__TURBO_DESKTOP__;
+  if (!bridge || !bridge._inspectorUrl) return;
+
+  var url = bridge._inspectorUrl();
+  if (!url) return;
+
+  import(url).then(bridge._startInspector).catch(bridge._inspectorFailed);
+})()"#;
+
 fn main() {
     env_logger::init();
 
@@ -93,11 +105,8 @@ fn main() {
                 let _ = webview.eval(js);
 
                 // The inspector is a module, and a script run before the
-                // page cannot always import one. This one can.
-                let _ = webview.eval(
-                    "window.__TURBO_DESKTOP__ && window.__TURBO_DESKTOP__._loadInspector \
-                     && window.__TURBO_DESKTOP__._loadInspector()",
-                );
+                // page cannot import one. This one, run after it, can.
+                let _ = webview.eval(LOAD_THE_INSPECTOR);
 
                 log::info!("Injected turbo-desktop.js into {}", payload.url());
             }

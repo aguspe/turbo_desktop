@@ -1348,14 +1348,53 @@ describe("TurboDesktop.toggleDevTools", () => {
 });
 
 describe("loading the Dev Inspector", () => {
-  it("can be asked for again by the shell, and starts once", async () => {
-    const { window } = createEnvironment({ invoke: () => undefined });
-    await tick();
+  function withTheTag() {
+    const env = createEnvironment({ invoke: () => undefined });
+    const meta = env.window.document.createElement("meta");
+    meta.name = "turbo-desktop-inspector";
+    meta.content = "enabled";
+    meta.dataset.inspectorUrl = "/turbo-desktop/inspector.js";
+    env.window.document.head.appendChild(meta);
+    return env;
+  }
 
-    assert.equal(typeof window.TurboDesktop._loadInspector, "function");
-    // Nothing on the page asks for the inspector, so asking changes nothing.
-    window.TurboDesktop._loadInspector();
-    window.TurboDesktop._loadInspector();
-    assert.equal(window.TurboDesktop._inspectorWanted, false);
+  it("tells the shell where to import it from", () => {
+    const { window } = withTheTag();
+
+    assert.equal(window.TurboDesktop._inspectorUrl(), "/turbo-desktop/inspector.js");
+  });
+
+  it("has nowhere to import it from when the page does not ask for it", () => {
+    const { window } = createEnvironment({ invoke: () => undefined });
+
+    assert.equal(window.TurboDesktop._inspectorUrl(), null);
+  });
+
+  it("starts it once, whoever imported it", () => {
+    const { window } = withTheTag();
+    let starts = 0;
+    const module = { startInspector: () => starts++ };
+
+    window.TurboDesktop._startInspector(module);
+    window.TurboDesktop._startInspector(module);
+
+    assert.equal(starts, 1);
+    assert.equal(window.TurboDesktop._inspectorUrl(), null, "asked to import what has already started");
+  });
+
+  it("tries again after a start that failed", () => {
+    const { window } = withTheTag();
+    let starts = 0;
+
+    assert.throws(() =>
+      window.TurboDesktop._startInspector({
+        startInspector: () => {
+          throw new Error("no body yet");
+        },
+      })
+    );
+    window.TurboDesktop._startInspector({ startInspector: () => starts++ });
+
+    assert.equal(starts, 1);
   });
 });

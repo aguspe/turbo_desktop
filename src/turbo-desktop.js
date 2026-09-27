@@ -1083,40 +1083,55 @@
 
   // Decided once the page has a head: the tag that turns the inspector on is
   // in it.
-  // Asked for twice: when the document is ready, and again by the shell once
-  // the page has loaded. A script the shell runs before the page cannot
-  // always import a module, and one it runs afterwards can. Whichever gets
-  // there first starts the inspector, once.
+  // The inspector is a module. A script the shell runs before the page
+  // cannot import one, in some webviews, wherever the call comes from; the
+  // shell does the importing itself once the page has loaded, and hands the
+  // module over. Importing from here still serves a shell that injects this
+  // script the older way, after the page. Whichever gets there first starts
+  // the inspector, once.
   let inspectorStarted = false;
 
-  function loadTheInspector() {
+  function inspectorUrl() {
     TurboDesktop._inspectorWanted = inspectorEnabled();
-    if (!INVOKE || !TurboDesktop._inspectorWanted || inspectorStarted) return;
+    if (!INVOKE || !TurboDesktop._inspectorWanted || inspectorStarted) return null;
 
-    // Resolve the inspector entry URL, in priority order:
+    // In priority order:
     //   1. an explicit override global,
     //   2. the same-origin URL the Rails gem advertises on the meta tag
     //      (turbo_desktop_inspector_meta_tag → data-inspector-url), served by
-    //      the gem's engine so this import() is same-origin,
+    //      the gem's engine so the import is same-origin,
     //   3. a relative fallback for setups that serve ./inspector.js themselves.
     var inspectorMeta = document.querySelector('meta[name="turbo-desktop-inspector"]');
-    var inspectorUrl =
+    return (
       window.__TURBO_DESKTOP_INSPECTOR_URL__ ||
       (inspectorMeta && inspectorMeta.dataset && inspectorMeta.dataset.inspectorUrl) ||
-      "./inspector.js";
-    import(inspectorUrl)
-      .then(function (m) {
-        if (inspectorStarted) return;
-        m.startInspector(TurboDesktop, { doc: document, win: window });
-        // Only once it has: a start that failed is worth another try.
-        inspectorStarted = true;
-        TurboDesktop._inspectorError = null;
-      })
-      .catch(function (e) {
-        TurboDesktop._inspectorError = String((e && e.stack) || e);
-        console.error("[turbo-desktop] inspector failed to load", e);
-      });
+      "./inspector.js"
+    );
   }
+
+  function startTheInspector(module) {
+    if (inspectorStarted) return;
+
+    module.startInspector(TurboDesktop, { doc: document, win: window });
+    // Only once it has: a start that failed is worth another try.
+    inspectorStarted = true;
+    TurboDesktop._inspectorError = null;
+  }
+
+  function inspectorFailed(error) {
+    TurboDesktop._inspectorError = String((error && error.stack) || error);
+  }
+
+  function loadTheInspector() {
+    const url = inspectorUrl();
+    if (!url) return;
+
+    import(url).then(startTheInspector).catch(inspectorFailed);
+  }
+
+  TurboDesktop._inspectorUrl = inspectorUrl;
+  TurboDesktop._startInspector = startTheInspector;
+  TurboDesktop._inspectorFailed = inspectorFailed;
   TurboDesktop._loadInspector = loadTheInspector;
 
   whenTheDocumentIsReady(() => {
