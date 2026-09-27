@@ -135,7 +135,12 @@ async function startOver() {
 before(async () => {
   assert.equal(await serverAnswers(), false, `something is already listening on ${ORIGIN}`);
 
-  driver = spawn("tauri-driver", [], { cwd: scratch, env: process.env, stdio: "inherit" });
+  driver = spawn("tauri-driver", [], {
+    cwd: scratch,
+    // The shell's own account of what it did, for when a test fails.
+    env: { ...process.env, RUST_LOG: process.env.RUST_LOG || "turbo_desktop=info" },
+    stdio: "inherit",
+  });
 
   browser = await waitFor(
     () =>
@@ -617,7 +622,7 @@ test("closing the app stops the server it started", async () => {
   browser = null;
 
   await waitFor(async () => !(await serverAnswers()), {
-    label: "the server to stop",
+    label: `the server to stop (SHELL=${process.env.SHELL || "unset"})`,
     tries: 40,
   });
 });
