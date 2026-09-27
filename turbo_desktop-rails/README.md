@@ -23,7 +23,7 @@ rails generate turbo_desktop:install
 
 ### Detection
 
-The gem detects Turbo Desktop requests via the User-Agent header (`Turbo Desktop/0.2.3 (macOS; aarch64)`).
+The gem detects Turbo Desktop requests via the User-Agent header (`Turbo Desktop/0.2.4 (macOS; aarch64)`).
 
 ```ruby
 # In controllers

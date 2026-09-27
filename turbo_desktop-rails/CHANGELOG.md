@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.4 (2026-09-27)
+
+Version aligned with the desktop shell's 0.2.4 release, which completes the
+TypeScript definitions and fixes the `turbo-desktop-bridge` package, whose
+types imported a file it did not ship. The README's quick start now mounts the
+engine instead of pointing at a route that does not exist. No gem-side API
+changes.
+
 ## 0.2.3 (2026-09-27)
 
 ### Fixed

@@ -317,3 +317,105 @@ test("the release guide covers every place a release has to reach", () => {
     assert.ok(guide.includes(step), `docs/RELEASING.md should cover \`${step}\``);
   }
 });
+
+// ─── What the documentation and the types promise ────────────────────────────
+
+test("the README mounts the engine rather than routing to a controller that does not exist", () => {
+  const readme = read("README.md");
+
+  assert.doesNotMatch(readme, /to:\s*"turbo_desktop#path_configuration"/);
+  assert.match(readme, /mount TurboDesktop::Engine => "\/turbo-desktop"/);
+});
+
+test("the README lists every bridge component the shell dispatches", () => {
+  const dispatch = read("src-tauri", "src", "bridge.rs").match(
+    /match message\.component\.as_str\(\) \{([\s\S]*?)\n {8}_ =>/
+  );
+  assert.ok(dispatch, "bridge.rs should dispatch on the component name");
+
+  const components = [...dispatch[1].matchAll(/^ {8}"([a-z-]+)" =>/gm)].map((match) => match[1]);
+  assert.ok(components.length >= 10, `expected the full dispatch table, found ${components}`);
+
+  const table = read("README.md").match(/### Built-in Components([\s\S]*?)\n### /)[1];
+  for (const component of components) {
+    assert.ok(table.includes(`\`${component}\``), `README.md does not list \`${component}\``);
+  }
+});
+
+// The public members of the object the shell injects, and of each namespace on
+// it. Members starting with an underscore are internal.
+function runtimeApi() {
+  const source = read("src", "turbo-desktop.js");
+  const body = source.slice(
+    source.indexOf("const TurboDesktop = {"),
+    source.indexOf("\n  };", source.indexOf("const TurboDesktop = {"))
+  );
+  const keywords = new Set(["if", "for", "while", "switch", "return", "catch"]);
+  const members = (indent) =>
+    [...body.matchAll(new RegExp(`^ {${indent}}(?:async |get )?([a-zA-Z]\\w*)\\s*[(:]`, "gm"))]
+      .map((match) => match[1])
+      .filter((name) => !keywords.has(name));
+
+  return { body, topLevel: members(4), nested: members(6) };
+}
+
+test("the type definitions declare every member of the runtime API", () => {
+  const types = read("src", "turbo-desktop.d.ts");
+  const api = types.slice(types.indexOf("export interface TurboDesktopAPI"));
+  const { topLevel, nested } = runtimeApi();
+
+  assert.ok(topLevel.includes("proposeVisit"), "the runtime API was not found in turbo-desktop.js");
+
+  const missing = [...new Set([...topLevel, ...nested])].filter(
+    (name) => !new RegExp(`\\b${name}\\??\\s*[(:<]`).test(api)
+  );
+  assert.deepEqual(missing, [], "turbo-desktop.d.ts is missing members the runtime has");
+});
+
+test("the bridge package carries the same version as the shell", () => {
+  const bridge = JSON.parse(read("packages", "bridge", "package.json"));
+
+  assert.equal(bridge.version, packageVersion(), "packages/bridge drifted from package.json");
+});
+
+test("the bridge package ships every file its types import", () => {
+  const bridge = JSON.parse(read("packages", "bridge", "package.json"));
+  const imports = [...read("packages", "bridge", "index.d.ts").matchAll(/from "(\.[^"]+)"/g)].map(
+    (match) => match[1]
+  );
+
+  assert.ok(imports.length > 0, "index.d.ts should import the shared types");
+  for (const path of imports) {
+    assert.ok(!path.startsWith(".."), `index.d.ts imports ${path}, which is outside the package`);
+    assert.ok(
+      bridge.files.includes(`${path.replace(/^\.\//, "")}.d.ts`),
+      `${path}.d.ts is imported but not listed in "files", so it is not published`
+    );
+  }
+});
+
+test("the bridge package's copy of the types matches the shell's", () => {
+  assert.equal(
+    read("packages", "bridge", "turbo-desktop.d.ts"),
+    read("src", "turbo-desktop.d.ts"),
+    "packages/bridge/turbo-desktop.d.ts drifted; copy src/turbo-desktop.d.ts over it"
+  );
+});
+
+test("the published types compile against the documented usage", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      join(PACKAGE_ROOT, "node_modules", "typescript", "bin", "tsc"),
+      "--noEmit",
+      "--strict",
+      "--target", "es2022",
+      "--module", "esnext",
+      "--moduleResolution", "bundler",
+      join(PACKAGE_ROOT, "fixtures", "types", "usage.ts"),
+    ],
+    { encoding: "utf-8" }
+  );
+
+  assert.equal(result.status, 0, `the types do not compile:\n${result.stdout}${result.stderr}`);
+});

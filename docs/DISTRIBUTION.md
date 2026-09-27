@@ -9,8 +9,8 @@ optional-but-recommended signing/update setup.
 This repo ships [`.github/workflows/release.yml`](../.github/workflows/release.yml). To release:
 
 ```bash
-git tag v0.2.3
-git push origin v0.2.3
+git tag v0.2.4
+git push origin v0.2.4
 ```
 
 CI then builds on three runners (Tauri can't cross-compile) and attaches installers to a **draft

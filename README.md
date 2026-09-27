@@ -217,8 +217,12 @@ rails generate turbo_desktop:install
 
 ```ruby
 # config/routes.rb
-get "/turbo-desktop/path-configuration", to: "turbo_desktop#path_configuration"
+mount TurboDesktop::Engine => "/turbo-desktop"
 ```
+
+The installer adds this line for you. It serves
+`/turbo-desktop/path-configuration.json` from the rules in
+`config/initializers/turbo_desktop.rb`, and the Dev Inspector's scripts.
 
 ### 5. Run the desktop app
 
@@ -282,6 +286,17 @@ The Bridge is the desktop equivalent of **Strada**. It lets your web components 
 | `file-picker` | Open native file-open/save dialogs |
 | `badge` | Set the dock/taskbar badge count |
 | `shortcut` | Register global keyboard shortcuts |
+| `filesystem` | Read and write inside declared roots and granted paths |
+| `shell` | Run child processes through the login shell, output streamed |
+| `sudo` | Run allowlisted commands elevated: macOS dialog, polkit, UAC |
+| `clipboard` | Read and write the system clipboard, no gesture needed |
+| `autostart` | Launch at login, behind a toggle the user can see |
+| `file-open` | Files opened with the app, even from a cold launch |
+| `updater` | Check for and install app updates |
+
+Each has a JavaScript API on `TurboDesktop` (`TurboDesktop.fs`, `.shell`,
+`.clipboard`, and so on), typed in `src/turbo-desktop.d.ts` and in the
+[`turbo-desktop-bridge`](packages/bridge) npm package.
 
 ### Modal and secondary windows
 
@@ -729,7 +744,7 @@ Ship native installers for macOS, Windows, and Linux by pushing a git tag — th
 draft GitHub Release:
 
 ```bash
-git tag v0.2.3 && git push origin v0.2.3
+git tag v0.2.4 && git push origin v0.2.4
 ```
 
 See **[docs/DISTRIBUTION.md](docs/DISTRIBUTION.md)** for local builds, using it in your own app,
