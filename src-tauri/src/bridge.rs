@@ -62,6 +62,7 @@ pub async fn handle_bridge_message(
         "filesystem" => crate::fs_bridge::handle_filesystem(&app, &message).await,
         "sudo" => crate::sudo_bridge::handle_sudo(&app, &message).await,
         "clipboard" => handle_clipboard(&app, &message).await,
+        "dialog" => handle_dialog(&app, &message).await,
         "devtools" => handle_devtools(&app, &message),
         "autostart" => handle_autostart(&app, &message).await,
         // The page drains files the OS asked the app to open. Pull rather than
@@ -354,6 +355,85 @@ pub fn menu_item_chosen<R: tauri::Runtime>(app: &tauri::AppHandle<R>, name: &str
             "data": { "id": name },
         }),
     );
+}
+
+/// Something to ask the person before going ahead.
+#[derive(Debug, PartialEq)]
+pub struct Question {
+    pub message: String,
+    pub title: Option<String>,
+    pub confirm: String,
+    pub cancel: String,
+}
+
+impl From<&serde_json::Value> for Question {
+    fn from(data: &serde_json::Value) -> Self {
+        let words = |key: &str| {
+            data[key]
+                .as_str()
+                .map(str::trim)
+                .filter(|text| !text.is_empty())
+                .map(str::to_string)
+        };
+
+        Self {
+            message: words("message").unwrap_or_default(),
+            title: words("title"),
+            confirm: words("confirm").unwrap_or_else(|| "OK".to_string()),
+            cancel: words("cancel").unwrap_or_else(|| "Cancel".to_string()),
+        }
+    }
+}
+
+/// Ask, or tell, with a dialog of the system's own.
+///
+/// A webview in the shell does not show the browser's `confirm()` and
+/// `alert()`: a page that asks that way is answered no, and nobody is asked.
+async fn handle_dialog(
+    app: &tauri::AppHandle,
+    message: &BridgeMessage,
+) -> Result<serde_json::Value, String> {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+
+    let question = Question::from(&message.data);
+    if question.message.is_empty() {
+        return Err("A dialog needs a message".to_string());
+    }
+
+    let asking = message.event == "confirm";
+    if !asking && message.event != "alert" {
+        return Ok(serde_json::json!({ "status": "unknown_event" }));
+    }
+
+    // A dialog cannot be answered by the end-to-end tests, which drive the
+    // page and not the system. In a debug build they say beforehand what the
+    // answer will be; a shipped app ignores the variable entirely.
+    #[cfg(debug_assertions)]
+    if let Ok(answer) = std::env::var("TURBO_DESKTOP_E2E_CONFIRM") {
+        log::info!("Dialog (e2e seam): '{}' answered {}", question.message, answer);
+        return Ok(serde_json::json!({ "status": "ok", "confirmed": answer == "yes" }));
+    }
+
+    let buttons = if asking {
+        MessageDialogButtons::OkCancelCustom(question.confirm.clone(), question.cancel.clone())
+    } else {
+        MessageDialogButtons::OkCustom(question.confirm.clone())
+    };
+
+    let mut dialog = app.dialog().message(&question.message).buttons(buttons);
+    if let Some(title) = &question.title {
+        dialog = dialog.title(title);
+    }
+
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    dialog.show(move |confirmed| {
+        let _ = tx.send(confirmed);
+    });
+
+    match rx.await {
+        Ok(confirmed) => Ok(serde_json::json!({ "status": "ok", "confirmed": confirmed })),
+        Err(e) => Err(format!("Dialog error: {}", e)),
+    }
 }
 
 /// What a page may say about the dialog it asks for.
@@ -858,6 +938,36 @@ mod native_component_tests {
         }));
 
         assert_eq!(options.filters, vec![("csv".to_string(), vec!["csv".to_string()])]);
+    }
+
+    #[test]
+    fn a_question_has_its_words_and_its_buttons() {
+        let question = Question::from(&json!({
+            "message": "Delete this task?",
+            "title": "Delete",
+            "confirm": "Delete",
+            "cancel": "Keep"
+        }));
+
+        assert_eq!(question.message, "Delete this task?");
+        assert_eq!(question.title.as_deref(), Some("Delete"));
+        assert_eq!(question.confirm, "Delete");
+        assert_eq!(question.cancel, "Keep");
+    }
+
+    #[test]
+    fn a_question_with_only_its_words_gets_the_usual_buttons() {
+        let question = Question::from(&json!({ "message": "Are you sure?" }));
+
+        assert_eq!(question.title, None);
+        assert_eq!(question.confirm, "OK");
+        assert_eq!(question.cancel, "Cancel");
+    }
+
+    #[test]
+    fn a_question_with_no_words_is_not_asked() {
+        assert!(Question::from(&json!({})).message.is_empty());
+        assert!(Question::from(&json!({ "message": "   " })).message.is_empty());
     }
 
     #[test]

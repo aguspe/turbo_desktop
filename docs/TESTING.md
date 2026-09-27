@@ -30,6 +30,7 @@ quits is not done until it is covered there.
 | `isModal`, `windowLabel` | the modal and new-window tests |
 | `recede()`, `refresh()`, `resume()`, `closeModal()` | one test each |
 | A saved form closes its modal | `saving a form in a modal closes it and shows the result underneath`, `leaving a modal by a link…` |
+| `data-turbo-confirm` asks, and goes ahead on yes | `a button that asks first goes ahead when the answer is yes` |
 | `new_window` | `a new_window rule opens a window of its own` |
 | `replace` | `a replace rule shows the page without adding to the history` |
 | `none` | `a rule of none leaves the link to a bridge component` |

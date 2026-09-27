@@ -1593,3 +1593,102 @@ describe("a file that started the app", () => {
     );
   });
 });
+
+describe("asking before something is done", () => {
+  // Turbo asks with the browser's confirm(), which a webview in the shell
+  // does not show: it answers no, and says nothing. Every data-turbo-confirm
+  // was a button that did nothing.
+  function shellThatAnswers(confirmed) {
+    const env = createEnvironment({
+      invoke: (cmd, args) => {
+        if (cmd !== "handle_bridge_message") return undefined;
+        const { component, event } = args.message;
+        if (component === "dialog" && event === "confirm") return { status: "ok", confirmed };
+        return { status: "ok" };
+      },
+    });
+    return env;
+  }
+
+  function asked(calls) {
+    return calls
+      .filter((call) => call.cmd === "handle_bridge_message")
+      .map((call) => call.args.message)
+      .filter((message) => message.component === "dialog");
+  }
+
+  it("asks with a dialog of the system's own", async () => {
+    const { window, calls } = shellThatAnswers(true);
+
+    const answer = await window.TurboDesktop.confirm("Are you sure?");
+
+    assert.equal(answer, true);
+    assertDeepEqual(asked(calls), [
+      { component: "dialog", event: "confirm", data: { message: "Are you sure?" } },
+    ]);
+  });
+
+  it("takes no for an answer", async () => {
+    const { window } = shellThatAnswers(false);
+
+    assert.equal(await window.TurboDesktop.confirm("Are you sure?"), false);
+  });
+
+  it("does not go ahead when the shell cannot ask", async () => {
+    const { window } = createEnvironment({
+      invoke: () => {
+        throw new Error("the shell is gone");
+      },
+    });
+
+    assert.equal(await window.TurboDesktop.confirm("Delete everything?"), false);
+  });
+
+  it("can say what the buttons are called", async () => {
+    const { window, calls } = shellThatAnswers(true);
+
+    await window.TurboDesktop.confirm("Delete this task?", {
+      title: "Delete",
+      confirm: "Delete",
+      cancel: "Keep",
+    });
+
+    assertDeepEqual(asked(calls)[0].data, {
+      message: "Delete this task?",
+      title: "Delete",
+      confirm: "Delete",
+      cancel: "Keep",
+    });
+  });
+
+  it("is what Turbo asks with", async () => {
+    const { window, calls } = shellThatAnswers(true);
+    window.Turbo = { config: { forms: {} }, visit() {} };
+    window.document.dispatchEvent(new window.Event("turbo:load"));
+
+    const answer = await window.Turbo.config.forms.confirm("Are you sure?");
+
+    assert.equal(answer, true);
+    assert.equal(asked(calls).length, 1);
+  });
+
+  it("is what an older Turbo asks with", async () => {
+    const { window } = shellThatAnswers(true);
+    let method;
+    window.Turbo = { setConfirmMethod: (fn) => (method = fn), visit() {} };
+    window.document.dispatchEvent(new window.Event("turbo:load"));
+
+    assert.equal(typeof method, "function");
+    assert.equal(await method("Are you sure?"), true);
+  });
+
+  it("leaves alone a way of asking the app has chosen for itself", async () => {
+    const { window } = shellThatAnswers(true);
+    const own = async () => false;
+    window.Turbo = { config: { forms: { confirm: own } }, visit() {} };
+
+    window.document.dispatchEvent(new window.Event("turbo:load"));
+
+    assert.equal(window.Turbo.config.forms.confirm, own);
+  });
+});

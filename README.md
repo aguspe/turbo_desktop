@@ -294,6 +294,7 @@ The Bridge is the desktop equivalent of **Strada**. It lets your web components 
 | `file-open` | Files opened with the app, even from a cold launch |
 | `deep-link` | The link the app was asked to open, kept until the page is there |
 | `updater` | Check for and install app updates |
+| `dialog` | Ask or tell with a dialog of the system's own; what `data-turbo-confirm` uses |
 | `devtools` | Open the webview's developer tools (development builds) |
 
 A file dialog can be told what it is for:
@@ -579,6 +580,30 @@ it arrives in full when the command finishes.
 ```
 
 Set `confirm` to `false` only if your app already asks the user itself.
+
+### Asking before something is done
+
+A webview in the shell does not show the browser's `confirm()` and `alert()`:
+a page that asks that way is answered no, and nobody is asked. Turbo asks that
+way for `data-turbo-confirm`, so the shell gives Turbo the system's dialog
+instead, and this works as written:
+
+```erb
+<%= button_to "Delete", task_path(task), method: :delete,
+      data: { turbo_confirm: "Are you sure?" } %>
+```
+
+An app that has set `Turbo.config.forms.confirm` itself keeps its own. To ask
+from JavaScript:
+
+```js
+if (await TurboDesktop.confirm("Delete this task?", { confirm: "Delete", cancel: "Keep" })) {
+  // …
+}
+await TurboDesktop.alert("Exported.", { title: "Tasks" })
+```
+
+No answer is a no: if the shell cannot ask, nothing goes ahead.
 
 ### Drag & drop from the desktop
 

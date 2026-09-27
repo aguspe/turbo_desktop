@@ -194,6 +194,30 @@
      * Toggle developer tools (dispatches to Rust which can open the inspector).
      */
     /**
+     * Ask before going ahead, with a dialog of the system's own. Resolves
+     * with true or false. The browser's confirm() is not shown by a webview
+     * in the shell, and answers no.
+     *
+     *   if (await TurboDesktop.confirm("Delete this task?", { confirm: "Delete" })) …
+     */
+    async confirm(message, options = {}) {
+      const answer = await TurboDesktop.sendBridgeMessage("dialog", "confirm", {
+        message: String(message),
+        ...options,
+      });
+      // No answer is a no: what is being asked about is usually not undone.
+      return Boolean(answer && answer.confirmed);
+    },
+
+    /** Say something, with a dialog of the system's own. */
+    async alert(message, options = {}) {
+      await TurboDesktop.sendBridgeMessage("dialog", "alert", {
+        message: String(message),
+        ...options,
+      });
+    },
+
+    /**
      * Open the webview's developer tools, or close them if they are open.
      * Development builds only: resolves with `{ status: "unavailable" }` in
      * an app built for release.
@@ -777,6 +801,33 @@
     if (element && element.isConnected) element.click();
   });
 
+  // ─── What Turbo asks with ──────────────────────────────────────────────────
+  //
+  // data-turbo-confirm asks with the browser's confirm(), which a webview in
+  // the shell does not show. Turbo is given the system's dialog instead,
+  // unless the app has chosen a way of asking for itself.
+
+  function giveTurboAWayToAsk() {
+    const turbo = window.Turbo;
+    if (!turbo || turbo.__turboDesktopAsks) return;
+
+    const ask = (message) => TurboDesktop.confirm(message);
+
+    if (turbo.config && turbo.config.forms) {
+      if (turbo.config.forms.confirm) return;
+      turbo.config.forms.confirm = ask;
+    } else if (typeof turbo.setConfirmMethod === "function") {
+      turbo.setConfirmMethod(ask);
+    } else {
+      return;
+    }
+    turbo.__turboDesktopAsks = true;
+  }
+
+  document.addEventListener("turbo:load", giveTurboAWayToAsk);
+  document.addEventListener("turbo:before-fetch-request", giveTurboAWayToAsk);
+  document.addEventListener("turbo:click", giveTurboAWayToAsk);
+
   document.addEventListener("turbo:load", bindDeclaredComponents);
   document.addEventListener("turbo:render", bindDeclaredComponents);
   document.addEventListener("turbo:frame-load", bindDeclaredComponents);
@@ -1191,6 +1242,7 @@
 
   whenTheDocumentIsReady(() => {
     loadTheInspector();
+    giveTurboAWayToAsk();
     bindDeclaredComponents();
 
     // For a script that would rather be told than check: TurboDesktop is

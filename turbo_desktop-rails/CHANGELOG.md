@@ -47,6 +47,10 @@ changed in the shell:
 - A deep link that starts the app is followed. It was handed to a window
   with no page in it yet, and lost. A file that starts the app while the
   server is still starting is kept for the app in the same way.
+- `data-turbo-confirm` asks. The webview does not show the browser's
+  `confirm()`, so every button that asked first did nothing. Turbo is given a
+  dialog of the system's own, and `TurboDesktop.confirm()` and `.alert()` ask
+  and tell from JavaScript.
 - Two bridge controllers on one page keep their own component names.
 - In development, the error page opens in the app rather than in the browser.
 - The offline banner goes away when the next request succeeds.

@@ -13,6 +13,7 @@ export type {
   DismissAction,
   DragDropPayload,
   VisitFailure,
+  DialogOptions,
 } from "./turbo-desktop.js";
 
 import type { TurboDesktopAPI, BridgeComponent as BridgeComponentClass, BridgeResponse } from "./turbo-desktop.js";

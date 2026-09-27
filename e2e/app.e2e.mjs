@@ -138,7 +138,13 @@ before(async () => {
   driver = spawn("tauri-driver", [], {
     cwd: scratch,
     // The shell's own account of what it did, for when a test fails.
-    env: { ...process.env, RUST_LOG: process.env.RUST_LOG || "turbo_desktop=info" },
+    env: {
+      ...process.env,
+      RUST_LOG: process.env.RUST_LOG || "turbo_desktop=info",
+      // A dialog is the system's, and cannot be answered from here. The
+      // debug build is told the answer beforehand.
+      TURBO_DESKTOP_E2E_CONFIRM: "yes",
+    },
     stdio: "inherit",
   });
 
@@ -425,6 +431,28 @@ test("the Dev Inspector is still there after moving to another page", async () =
     await browser.execute(() => document.querySelectorAll("[data-turbo-desktop-inspector]").length),
     1
   );
+});
+
+test("a button that asks first goes ahead when the answer is yes", async () => {
+  await startOver();
+  await click("to-tasks");
+  await waitFor(async () => (await path()) === "/tasks", { label: "the tasks page" });
+  assert.equal(await (await browser.$("#gone")).getText(), "0 deleted");
+
+  await click("delete");
+
+  await waitFor(async () => (await (await browser.$("#gone")).getText()) === "1 deleted", {
+    label: "the task to be deleted, and the page to show it",
+  });
+  assert.equal(await path(), "/tasks");
+});
+
+test("TurboDesktop.confirm answers with what the person said", async () => {
+  const answer = await browser.executeAsync((done) => {
+    window.TurboDesktop.confirm("Delete this task?", { confirm: "Delete" }).then(done);
+  });
+
+  assert.equal(answer, true);
 });
 
 test("a new_window rule opens a window of its own", async () => {

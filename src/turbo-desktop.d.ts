@@ -114,6 +114,15 @@ export declare class BridgeComponent {
   onReceive(message: BridgeResponse): void;
 }
 
+/** What a dialog says besides its message. */
+export interface DialogOptions {
+  title?: string;
+  /** The button that goes ahead. "OK" unless said. */
+  confirm?: string;
+  /** The button that does not. "Cancel" unless said. */
+  cancel?: string;
+}
+
 /** Why a visit failed, in Hotwire Native's vocabulary. */
 export type VisitFailure =
   | "network_failure"
@@ -217,6 +226,16 @@ export interface TurboDesktopAPI {
    * `refresh()` and `resume()` call this for the window the page is in.
    */
   dismiss(then?: DismissAction, label?: string, url?: string): Promise<void>;
+
+  /**
+   * Ask before going ahead, with a dialog of the system's own. The browser's
+   * `confirm()` is not shown by a webview in the shell, and answers no.
+   * Turbo's `data-turbo-confirm` uses this without being told to.
+   */
+  confirm(message: string, options?: DialogOptions): Promise<boolean>;
+
+  /** Say something, with a dialog of the system's own. */
+  alert(message: string, options?: Omit<DialogOptions, "cancel">): Promise<void>;
 
   /**
    * Open the webview's developer tools, or close them if they are open.

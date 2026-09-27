@@ -33,6 +33,7 @@ const INSPECTOR_MODULES = ["state.js", "panel.js", "bridge-tap.js", "catalog.js"
 
 const requests = [];
 let saved = 0;
+let deleted = 0;
 
 function page(title, body) {
   return `<!doctype html>
@@ -73,7 +74,17 @@ function page(title, body) {
 
 const PAGES = {
   "/": () => page("Home", "<p>Home</p>"),
-  "/tasks": () => page("Tasks", `<ul><li>One</li><li>Two</li></ul><p id="count">${saved} saved</p>`),
+  "/tasks": () =>
+    page(
+      "Tasks",
+      `<ul><li>One</li><li>Two</li></ul>
+       <p id="count">${saved} saved</p>
+       <p id="gone">${deleted} deleted</p>
+       <form action="/tasks/1" method="post" data-turbo-confirm="Are you sure?">
+         <input type="hidden" name="_method" value="delete">
+         <button id="delete" type="submit">Delete</button>
+       </form>`
+    ),
   "/tasks/new": () =>
     page(
       "New task",
@@ -133,6 +144,14 @@ function handle(req, res) {
     res.writeHead(303, { location: "/tasks" });
     return res.end();
   }
+  // Deleting one, which the page asks about first.
+  if (path === "/tasks/1" && req.method === "POST") {
+    req.resume();
+    deleted += 1;
+    res.writeHead(303, { location: "/tasks" });
+    return res.end();
+  }
+
   if (path === "/__saved") return respond(res, 200, "application/json", JSON.stringify({ saved }));
 
   if (path === "/up") return respond(res, 200, "text/plain", "ok");
