@@ -39,9 +39,22 @@
 
   // ─── Core API ──────────────────────────────────────────────────────────────
 
+  // The shell's user agent names the platform it is running on, e.g.
+  // "Turbo Desktop/0.2.4 (Windows; x86_64)". This file is the same on every
+  // platform, so the answer has to be read rather than written in.
+  function detectPlatform() {
+    const agent = navigator.userAgent || "";
+    const named = agent.match(/Turbo Desktop\/[\w.]+ \((\w+);/);
+    if (named) return named[1].toLowerCase();
+
+    if (/Windows/i.test(agent)) return "windows";
+    if (/Linux/i.test(agent)) return "linux";
+    return "macos";
+  }
+
   const TurboDesktop = {
     version: "0.2.4",
-    platform: "macos",
+    platform: detectPlatform(),
     isNative: true,
 
     /**
@@ -432,30 +445,61 @@
   // ─── Turbo Drive Integration ───────────────────────────────────────────────
 
   /**
-   * Intercept Turbo Drive's "before-visit" to propose the visit to the native shell.
-   * If the shell decides to open a modal or new window, we cancel the Turbo visit.
+   * Every visit is proposed to the shell, which consults the path
+   * configuration and decides how the URL is presented.
+   *
+   * Turbo reads `defaultPrevented` as soon as the event has been dispatched,
+   * and the shell's answer arrives later, over IPC. So the visit is held
+   * first and carried on with once the shell has agreed to it. Deciding after
+   * the answer, as this used to, was deciding too late: a rule that opened a
+   * modal also navigated the main window to the same URL.
    */
-  document.addEventListener("turbo:before-visit", async (event) => {
+  const approvedVisits = new Set();
+  let clicked = null;
+
+  // The action a link asked for. `before-visit` only says where, not how.
+  document.addEventListener("turbo:click", (event) => {
+    const link = event.target.closest ? event.target.closest("[data-turbo-action]") : null;
+    clicked = {
+      url: event.detail.url,
+      action: link ? link.dataset.turboAction : "advance",
+    };
+  });
+
+  function carryOn(url, action) {
+    if (!window.Turbo) {
+      window.location.assign(url);
+      return;
+    }
+
+    approvedVisits.add(url);
+    window.Turbo.visit(url, { action });
+  }
+
+  document.addEventListener("turbo:before-visit", (event) => {
     const url = event.detail.url;
 
-    // Notify Rust that a page is loading
-    if (INVOKE) {
-      INVOKE("page_loading", { url }).catch(() => {});
+    // A visit the shell has already agreed to, coming back round.
+    if (approvedVisits.delete(url)) {
+      if (INVOKE) {
+        INVOKE("page_loading", { url }).catch(() => {});
+      }
+      return;
     }
 
-    // Propose the visit to the native shell
-    const response = await TurboDesktop.proposeVisit(url, "advance");
+    const action = clicked && clicked.url === url ? clicked.action : "advance";
+    clicked = null;
 
-    // If the native shell handled it (modal, new window, native screen),
-    // cancel the Turbo visit — the native side opens the URL itself.
-    if (response.action === "none") {
-      event.preventDefault();
-    }
-    // If "replace", tell Turbo to replace instead of advance
-    else if (response.action === "replace") {
-      event.preventDefault();
-      window.Turbo?.visit(url, { action: "replace" });
-    }
+    event.preventDefault();
+
+    TurboDesktop.proposeVisit(url, action).then((response) => {
+      // A modal, a new window, a native screen: the shell opens the URL
+      // itself, and this window stays where it is.
+      const decided = response ? response.action : action;
+      if (decided === "none") return;
+
+      carryOn(url, decided === "replace" ? "replace" : action);
+    });
   });
 
   /**
@@ -576,11 +620,17 @@
    *   }
    */
   TurboDesktop.stimulusBridge = function (BaseController, componentName) {
+    // A class of its own for each component. Naming the component on
+    // BridgeComponent itself renamed it for every controller on the page, so
+    // two of them both spoke as whichever connected last.
+    class Component extends BridgeComponent {
+      static component = componentName;
+    }
+
     return class extends BaseController {
       connect() {
         super.connect();
-        this._bridge = new BridgeComponent(this.element);
-        this._bridge.constructor.component = componentName;
+        this._bridge = new Component(this.element);
         this._bridge.onReceive = (msg) => this.receiveBridge(msg);
         this._bridge.connect();
       }
