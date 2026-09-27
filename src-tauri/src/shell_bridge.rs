@@ -227,9 +227,9 @@ async fn handle_list(app: &tauri::AppHandle) -> Result<serde_json::Value, String
 
 /// How to run a command line on this platform.
 ///
-/// On Unix the command runs through the user's login shell, so a version
-/// manager (rbenv, nvm, mise) sets up PATH the same way it would in a
-/// terminal. Windows has no login-shell convention — PATH comes from the
+/// On Unix the command runs through the user's shell as a terminal would
+/// start it, login and interactive, so a version manager (rbenv, nvm, mise)
+/// sets up PATH the same way it would there. Windows has no login-shell convention — PATH comes from the
 /// registry and is already present — so the command goes through `cmd /C`.
 pub fn shell_invocation(command: &str) -> (String, Vec<String>) {
     #[cfg(windows)]
@@ -244,7 +244,15 @@ pub fn shell_invocation(command: &str) -> (String, Vec<String>) {
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
         (
             shell,
-            vec!["-l".to_string(), "-c".to_string(), command.to_string()],
+            // Login and interactive. A login shell alone reads ~/.zprofile,
+            // but version managers install themselves in ~/.zshrc or
+            // ~/.bashrc, which only an interactive shell reads.
+            vec![
+                "-l".to_string(),
+                "-i".to_string(),
+                "-c".to_string(),
+                command.to_string(),
+            ],
         )
     }
 }
@@ -291,7 +299,19 @@ mod tests {
             program,
             std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into())
         );
-        assert_eq!(args, vec!["-l", "-c", "bin/rails server"]);
+        assert_eq!(args.last().map(String::as_str), Some("bin/rails server"));
+        assert!(args.contains(&"-l".to_string()));
+        assert!(args.contains(&"-c".to_string()));
+    }
+
+    // rbenv, asdf, nvm and mise install themselves in ~/.zshrc or ~/.bashrc,
+    // which only an interactive shell reads. A login shell alone found the
+    // system's Ruby instead of the project's.
+    #[cfg(not(windows))]
+    #[test]
+    fn the_shell_reads_what_a_terminal_would() {
+        let (_, args) = shell_invocation("bin/rails server");
+        assert_eq!(args, vec!["-l", "-i", "-c", "bin/rails server"]);
     }
 
     #[cfg(windows)]

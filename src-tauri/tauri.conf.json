@@ -5,7 +5,6 @@
   "identifier": "com.turbo-desktop.app",
   "build": {
     "frontendDist": "../src",
-    "devUrl": "http://localhost:3000",
     "beforeDevCommand": "",
     "beforeBuildCommand": ""
   },

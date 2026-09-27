@@ -419,3 +419,13 @@ test("the published types compile against the documented usage", () => {
 
   assert.equal(result.status, 0, `the types do not compile:\n${result.stdout}${result.stderr}`);
 });
+
+test("the shell does not wait for a server that it is the one to start", () => {
+  const conf = JSON.parse(read("src-tauri", "tauri.conf.json"));
+
+  // With a devUrl, `tauri dev` waits for that address to answer before it
+  // starts the shell. The shell is what starts the Rails server, so neither
+  // ever began: it gave up after three minutes.
+  assert.equal(conf.build.devUrl, undefined);
+  assert.equal(conf.build.frontendDist, "../src");
+});

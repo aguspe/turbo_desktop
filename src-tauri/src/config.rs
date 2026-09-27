@@ -249,6 +249,30 @@ pub async fn fetch_path_configuration(
     Ok(config)
 }
 
+/// Ask the server for its rules, put them in force, and keep them for the
+/// next launch. Returns how many rules arrived.
+///
+/// On failure the rules already in force are left alone.
+pub async fn refresh_from_server(
+    url: &str,
+    user_agent: &str,
+    store: &PathConfigurationStore,
+    cache_dir: Option<&Path>,
+) -> Result<usize, String> {
+    let config = fetch_path_configuration(url, user_agent).await?;
+    let rules = config.rules.len();
+
+    // Keep it for the next launch before handing it over.
+    if let Some(dir) = cache_dir {
+        if let Err(e) = save_cache(dir, &config) {
+            log::warn!("{}", e);
+        }
+    }
+
+    store.set(config);
+    Ok(rules)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -291,6 +315,88 @@ mod tests {
         .expect("settings the desktop shell ignores must not break parsing");
 
         assert_eq!(config.rules.len(), 1);
+    }
+
+    /// A server that answers one request with the given rules, then goes away.
+    fn serve_once(body: &'static str) -> String {
+        use std::io::{Read, Write};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut request = [0u8; 2048];
+                let _ = stream.read(&mut request);
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+            }
+        });
+
+        format!("http://{address}/turbo-desktop/path-configuration.json")
+    }
+
+    // An app that starts its own server always finds it down at launch. The
+    // rules were asked for once, then, and never again: modals did not work
+    // until the app had been quit and opened a second time.
+    #[tokio::test]
+    async fn the_servers_rules_come_into_force_when_it_answers() {
+        let dir = scratch("refresh");
+        let store = PathConfigurationStore::new();
+        let url = serve_once(
+            r#"{"rules":[{"patterns":["/new$"],"properties":{"presentation":"modal"}}]}"#,
+        );
+
+        let rules = refresh_from_server(&url, "Turbo Desktop/test", &store, Some(&dir)).await;
+
+        assert_eq!(rules, Ok(1));
+        assert_eq!(
+            store.properties_for_path("/tasks/new").presentation,
+            Presentation::Modal
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn the_servers_rules_are_kept_for_the_next_launch() {
+        let dir = scratch("refresh-cache");
+        let store = PathConfigurationStore::new();
+        let url = serve_once(
+            r#"{"rules":[{"patterns":["/new$"],"properties":{"presentation":"modal"}}]}"#,
+        );
+
+        refresh_from_server(&url, "Turbo Desktop/test", &store, Some(&dir))
+            .await
+            .unwrap();
+
+        let (kept, _) = startup_configuration(Some(&dir), None).expect("the rules were not cached");
+        assert_eq!(kept.rules.len(), 1);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_server_leaves_the_rules_in_force_alone() {
+        let store = store_with(
+            r#"{"rules":[{"patterns":["/edit$"],"properties":{"presentation":"modal"}}]}"#,
+        );
+
+        // Nothing listens on port 9 of the loopback address.
+        let outcome = refresh_from_server(
+            "http://127.0.0.1:9/turbo-desktop/path-configuration.json",
+            "Turbo Desktop/test",
+            &store,
+            None,
+        )
+        .await;
+
+        assert!(outcome.is_err());
+        assert_eq!(
+            store.properties_for_path("/tasks/1/edit").presentation,
+            Presentation::Modal
+        );
     }
 
     #[test]
