@@ -1107,10 +1107,15 @@
     import(inspectorUrl)
       .then(function (m) {
         if (inspectorStarted) return;
-        inspectorStarted = true;
         m.startInspector(TurboDesktop, { doc: document, win: window });
+        // Only once it has: a start that failed is worth another try.
+        inspectorStarted = true;
+        TurboDesktop._inspectorError = null;
       })
-      .catch(function (e) { console.error("[turbo-desktop] inspector failed to load", e); });
+      .catch(function (e) {
+        TurboDesktop._inspectorError = String((e && e.stack) || e);
+        console.error("[turbo-desktop] inspector failed to load", e);
+      });
   }
   TurboDesktop._loadInspector = loadTheInspector;
 

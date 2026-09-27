@@ -641,7 +641,12 @@ test("the Dev Inspector loads and opens with its shortcut", async () => {
     // Why not, in the page's own words.
     const why = await browser.executeAsync((done) => {
       const td = window.TurboDesktop;
-      const report = [`wanted=${td._inspectorWanted}`, `ready=${td.ready}`];
+      const report = [
+        `wanted=${td._inspectorWanted}`,
+        `ready=${td.ready}`,
+        `error=${td._inspectorError}`,
+        `body=${Boolean(document.body)}`,
+      ];
       const timer = setTimeout(() => done([...report, "import: still pending after 5s"]), 5000);
       import("/turbo-desktop/inspector.js").then(
         (m) => {
