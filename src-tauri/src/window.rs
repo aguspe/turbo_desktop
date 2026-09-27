@@ -765,9 +765,16 @@ pub fn apply_shell_defaults<'a, M: tauri::Manager<tauri::Wry>>(
         serde_json::to_string(label).unwrap_or_else(|_| "null".into()),
     );
 
+    // The bridge itself, before anything the page loads. Injected once the
+    // page had finished loading, it arrived after the page's own scripts had
+    // run: a Stimulus controller that used TurboDesktop in connect() found
+    // nothing there on the first page of every window.
+    let bridge = include_str!("../../src/turbo-desktop.js");
+
     builder
         .user_agent(&config.user_agent)
         .initialization_script(&globals)
+        .initialization_script(bridge)
         .on_navigation(move |url| {
             match crate::security::destination_for(&navigation_server, &navigation_hosts, url) {
                 crate::security::LinkDestination::App => true,

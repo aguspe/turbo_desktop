@@ -1104,3 +1104,96 @@ describe("listening to a process's output twice", () => {
     });
   }
 });
+
+describe("being there before the page's own scripts", () => {
+  // The shell runs this script before anything the page loads, so that a
+  // Stimulus controller can use TurboDesktop in connect(). The document has
+  // no head or body yet at that point.
+  async function beforeThePage() {
+    const dom = new JSDOM(`<!DOCTYPE html>`, {
+      url: "https://myapp.test/",
+      runScripts: "dangerously",
+    });
+    const { window } = dom;
+    // Let jsdom finish loading its own empty document first, so the only
+    // DOMContentLoaded from here on is the one the test dispatches.
+    await tick();
+    const ready = [];
+    const calls = [];
+
+    Object.defineProperty(window.document, "readyState", {
+      get: () => (ready.loaded ? "complete" : "loading"),
+      configurable: true,
+    });
+    window.__TAURI_INTERNALS__ = {
+      invoke: async (cmd, args) => {
+        calls.push({ cmd, args });
+      },
+    };
+    window.document.addEventListener("turbo-desktop:ready", (event) => ready.push(event.detail));
+
+    window.eval(scriptSource);
+
+    return {
+      window,
+      ready,
+      calls,
+      finishLoading() {
+        ready.loaded = true;
+        window.document.dispatchEvent(new window.Event("DOMContentLoaded"));
+      },
+    };
+  }
+
+  it("is usable at once", async () => {
+    const { window } = await beforeThePage();
+
+    assert.equal(window.TurboDesktop.isNative, true);
+    assert.equal(typeof window.TurboDesktop.sendBridgeMessage, "function");
+  });
+
+  it("says it is ready once the document is, and not before", async () => {
+    const { ready, finishLoading } = await beforeThePage();
+    await tick();
+    assert.equal(ready.length, 0, "announced readiness to a document with nothing in it");
+
+    finishLoading();
+    await tick();
+
+    assert.equal(ready.length, 1);
+    assert.equal(ready[0].version, packageVersion);
+  });
+
+  it("says it is ready straight away when the document already is", async () => {
+    const { window } = createEnvironment({ invoke: () => undefined });
+    await tick();
+
+    // Too late to hear the event: what a late listener can check instead.
+    assert.equal(window.TurboDesktop.ready, true);
+  });
+
+  it("looks for the Dev Inspector's tag once there is a head to look in", async () => {
+    const { window, finishLoading } = await beforeThePage();
+    assert.equal(window.TurboDesktop._inspectorWanted, undefined, "decided before the page had a head");
+
+    const meta = window.document.createElement("meta");
+    meta.name = "turbo-desktop-inspector";
+    meta.content = "enabled";
+    window.document.head.appendChild(meta);
+    finishLoading();
+    await tick();
+
+    assert.equal(window.TurboDesktop._inspectorWanted, true);
+  });
+
+  it("sets the title once there is one", async () => {
+    const { window, calls, finishLoading } = await beforeThePage();
+    window.document.title = "Tasks";
+
+    finishLoading();
+    await tick();
+
+    const titles = calls.filter((call) => call.cmd === "update_window_title");
+    assert.equal(titles.at(-1).args.title, "Tasks");
+  });
+});

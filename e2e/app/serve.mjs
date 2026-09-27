@@ -42,6 +42,12 @@ function page(title, body) {
     <!-- Turbo fetches a link when the pointer reaches it. Off, so that a
          request seen by the server is a page somebody actually visited. -->
     <meta name="turbo-prefetch" content="false">
+    <script>
+      // What a page's own script finds when it runs, which is what a Stimulus
+      // controller finds in connect().
+      window.__bridgeWhenThePageRan = Boolean(window.TurboDesktop && window.TurboDesktop.isNative);
+      document.addEventListener("turbo-desktop:ready", () => { window.__heardReady = true; });
+    </script>
     <script src="/turbo.js"></script>
   </head>
   <body>

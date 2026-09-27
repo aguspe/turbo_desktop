@@ -195,6 +195,26 @@ test("the rules are fetched once the server the app started is up", async () => 
   assert.match(asked[0].userAgent, /Turbo Desktop/);
 });
 
+test("the bridge is there before the page's own scripts run", async () => {
+  assert.equal(
+    await browser.execute(() => window.__bridgeWhenThePageRan),
+    true,
+    "a controller's connect() would find no TurboDesktop on the first page"
+  );
+  assert.equal(await browser.execute(() => window.__heardReady), true);
+  assert.equal(await browser.execute(() => window.TurboDesktop.ready), true);
+});
+
+test("the bridge is there from the start in a modal too", async () => {
+  await startOver();
+  await click("to-new-task");
+  await browser.switchToWindow(await otherWindow());
+  await waitFor(bridgeReady, { label: "the bridge in the modal" });
+
+  assert.equal(await browser.execute(() => window.__bridgeWhenThePageRan), true);
+  await startOver();
+});
+
 test("the page knows which platform it is on", async () => {
   const platform = await browser.execute(() => window.TurboDesktop.platform);
   const expected = { linux: "linux", win32: "windows", darwin: "macos" }[process.platform];

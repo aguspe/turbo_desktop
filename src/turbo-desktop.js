@@ -57,6 +57,9 @@
     platform: detectPlatform(),
     isNative: true,
 
+    /** True once the document has loaded. `turbo-desktop:ready` says when. */
+    ready: false,
+
     /**
      * Send a visit proposal to the native shell.
      * The shell consults the path configuration and decides how to present the URL.
@@ -938,14 +941,19 @@
 
   // ─── Initial Setup ─────────────────────────────────────────────────────────
 
-  // Sync title on initial load (before Turbo is initialized)
-  if (document.readyState === "complete" || document.readyState === "interactive") {
-    TurboDesktop.setTitle(document.title);
-  } else {
-    document.addEventListener("DOMContentLoaded", () => {
-      TurboDesktop.setTitle(document.title);
-    });
+  // The shell runs this script before anything the page loads, so that a
+  // page's own scripts find TurboDesktop already there. The document has no
+  // head, body or title at that point, so what needs them waits for them.
+  function whenTheDocumentIsReady(callback) {
+    if (document.readyState === "complete" || document.readyState === "interactive") {
+      callback();
+    } else {
+      document.addEventListener("DOMContentLoaded", callback, { once: true });
+    }
   }
+
+  // Sync title on initial load (before Turbo is initialized)
+  whenTheDocumentIsReady(() => TurboDesktop.setTitle(document.title));
 
   // Expose the API globally
   window.__TURBO_DESKTOP__ = TurboDesktop;
@@ -964,7 +972,12 @@
   }
   TurboDesktop._inspectorEnabled = inspectorEnabled;
 
-  if (INVOKE && inspectorEnabled()) {
+  // Decided once the page has a head: the tag that turns the inspector on is
+  // in it.
+  function loadTheInspector() {
+    TurboDesktop._inspectorWanted = inspectorEnabled();
+    if (!INVOKE || !TurboDesktop._inspectorWanted) return;
+
     // Resolve the inspector entry URL, in priority order:
     //   1. an explicit override global,
     //   2. the same-origin URL the Rails gem advertises on the meta tag
@@ -980,4 +993,17 @@
       .then(function (m) { m.startInspector(TurboDesktop, { doc: document, win: window }); })
       .catch(function (e) { console.error("[turbo-desktop] inspector failed to load", e); });
   }
+
+  whenTheDocumentIsReady(() => {
+    loadTheInspector();
+
+    // For a script that would rather be told than check: TurboDesktop is
+    // there before it, but the document was not.
+    TurboDesktop.ready = true;
+    document.dispatchEvent(
+      new CustomEvent("turbo-desktop:ready", {
+        detail: { version: TurboDesktop.version, platform: TurboDesktop.platform },
+      })
+    );
+  });
 })();

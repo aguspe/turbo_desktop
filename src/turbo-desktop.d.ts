@@ -145,6 +145,13 @@ export interface TurboDesktopAPI {
   readonly isNative: true;
 
   /**
+   * True once the document has loaded. The API itself is there before the
+   * page's own scripts run; `turbo-desktop:ready` is dispatched on `document`
+   * when this becomes true.
+   */
+  readonly ready: boolean;
+
+  /**
    * Send a visit proposal to the native shell.
    * The shell consults the path configuration and decides how to present the URL.
    *

@@ -25,6 +25,10 @@ changes. What changed in the shell:
 - The `notification`, `badge`, `menu-item` and `shortcut` components do what
   they say. They answered "ok" and did nothing: no notification appeared, no
   badge was set, no menu item or shortcut was registered.
+- `TurboDesktop` is there before the page's own scripts run. It used to arrive
+  after the page had loaded, so a Stimulus controller that used it in
+  `connect()` found nothing on the first page of every window.
+  `turbo-desktop:ready` is dispatched once the document has loaded.
 - Two bridge controllers on one page keep their own component names.
 - In development, the error page opens in the app rather than in the browser.
 - The offline banner goes away when the next request succeeds.
