@@ -208,6 +208,60 @@ describe("TurboDesktop.setTitle", () => {
   });
 });
 
+// ─── Window API ───────────────────────────────────────────────────────────
+
+describe("TurboDesktop.window", () => {
+  const bridgeInvoke = async (cmd) => (cmd === "handle_bridge_message" ? { status: "ok" } : null);
+
+  const sent = (calls, event) =>
+    calls.find(
+      (c) => c.cmd === "handle_bridge_message" &&
+             c.args.message.component === "window" &&
+             c.args.message.event === event
+    );
+
+  it("sends a resize with the requested size", async () => {
+    const { window, calls } = createEnvironment({ invoke: bridgeInvoke });
+    await tick();
+
+    await window.TurboDesktop.window.resize(1200, 900);
+
+    const call = sent(calls, "resize");
+    assert.ok(call, "no window/resize message was sent");
+    assertDeepEqual(call.args.message.data, { width: 1200, height: 900 });
+  });
+
+  it("defaults the toggling actions to enabling them", async () => {
+    const { window, calls } = createEnvironment({ invoke: bridgeInvoke });
+    await tick();
+
+    await window.TurboDesktop.window.fullscreen();
+    await window.TurboDesktop.window.alwaysOnTop();
+
+    assertDeepEqual(sent(calls, "fullscreen").args.message.data, { enabled: true });
+    assertDeepEqual(sent(calls, "always-on-top").args.message.data, { enabled: true });
+  });
+
+  it("passes false through rather than treating it as absent", async () => {
+    const { window, calls } = createEnvironment({ invoke: bridgeInvoke });
+    await tick();
+
+    await window.TurboDesktop.window.fullscreen(false);
+
+    assertDeepEqual(sent(calls, "fullscreen").args.message.data, { enabled: false });
+  });
+
+  it("sends the parameterless actions with an empty payload", async () => {
+    const { window, calls } = createEnvironment({ invoke: bridgeInvoke });
+    await tick();
+
+    for (const action of ["minimize", "maximize", "unmaximize", "center", "focus", "state"]) {
+      await window.TurboDesktop.window[action]();
+      assert.ok(sent(calls, action), `no window/${action} message was sent`);
+    }
+  });
+});
+
 // ─── sendBridgeMessage ────────────────────────────────────────────────────
 
 describe("TurboDesktop.sendBridgeMessage", () => {

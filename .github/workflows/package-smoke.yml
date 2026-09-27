@@ -1,0 +1,225 @@
+name: Package a Rails app end to end
+
+# The acceptance test for the packaging chain. Nothing here is mocked: it
+# builds the interpreter, generates a real Rails app, packs it into a bundle,
+# prunes it, signs it, then launches the result and talks to it over HTTP.
+#
+# Ad-hoc signing is used because CI has no Developer ID. That is enough to
+# exercise the hardened runtime, which is where Ruby and macOS actually
+# disagree — see packaging/DISTRIBUTION.md for what it cannot tell us.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "packaging/**"
+      - ".github/workflows/package-smoke.yml"
+
+jobs:
+  macos:
+    runs-on: macos-14
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache the vendored dependencies
+        uses: actions/cache@v4
+        with:
+          path: .runtime-build/vendor
+          key: vendor-arm64-darwin-openssl3.5.4-libdir-yaml0.2.5
+
+      - name: Build the interpreter
+        run: packaging/build-runtime.sh --out "$PWD/out/ruby"
+
+      - name: It relocates
+        run: packaging/verify-runtime.sh "$PWD/out/ruby"
+
+      - name: Generate a Rails app with the interpreter we just built
+        run: |
+          set -euo pipefail
+          export GEM_HOME="$PWD/out/gems"
+          GEM_PATH="$GEM_HOME:$(echo "$PWD"/out/ruby/lib/ruby/gems/*)"
+          export GEM_PATH
+          export PATH="$PWD/out/ruby/bin:$GEM_HOME/bin:$PATH"
+
+          # railties rather than the full rails meta-gem: a desktop app has one
+          # user and no cable server, so actioncable is not part of the payload.
+          gem install railties --no-document
+          rails new "$PWD/example" --minimal --skip-git --skip-bundle --skip-action-cable
+
+          cp packaging/smoke/Gemfile "$PWD/example/Gemfile"
+          cd "$PWD/example" && bundle install
+          echo "app generated and bundled"
+
+      - name: Pack, prune and sign
+        run: |
+          packaging/pack.sh \
+            --app "$PWD/example" \
+            --runtime "$PWD/out/ruby" \
+            --gems "$PWD/out/gems" \
+            --name "Smoke" --bundle-id dev.turbodesktop.smoke \
+            --out "$PWD/dist"
+
+      - name: Launch the bundle and talk to it
+        run: python3 packaging/smoke/launch_check.py dist/Smoke.app/Contents/MacOS/launch
+
+      - name: Build the disk image
+        run: packaging/dmg.sh dist/Smoke.app
+
+      - name: What Gatekeeper makes of it
+        run: |
+          # Expected to be rejected: CI has no Developer ID. Recorded rather
+          # than asserted, so the day that changes is visible in the log.
+          echo "codesign: $(codesign --verify --strict dist/Smoke.app 2>&1 && echo pass || echo fail)"
+          echo "spctl:    $(spctl -a -vv dist/Smoke.app 2>&1 | head -2 | tr '\n' ' ')"
+
+      - name: Sizes
+        run: |
+          du -sh out/ruby dist/Smoke.app dist/Smoke.dmg | sed 's/^/  /'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smoke-dmg
+          path: dist/*.dmg
+          retention-days: 7
+
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq build-essential zlib1g-dev rsync
+
+      - name: Cache the vendored dependencies
+        uses: actions/cache@v4
+        with:
+          path: .runtime-build/vendor
+          key: vendor-x86_64-linux-openssl3.5.4-libdir-yaml0.2.5
+
+      - name: Build the interpreter
+        run: packaging/build-runtime.sh --out "$PWD/out/ruby"
+
+      - name: It relocates
+        run: packaging/verify-runtime.sh "$PWD/out/ruby"
+
+      - name: Generate a Rails app with the interpreter we just built
+        run: |
+          set -euo pipefail
+          export GEM_HOME="$PWD/out/gems"
+          GEM_PATH="$GEM_HOME:$(echo "$PWD"/out/ruby/lib/ruby/gems/*)"
+          export GEM_PATH
+          export PATH="$PWD/out/ruby/bin:$GEM_HOME/bin:$PATH"
+          gem install railties --no-document
+          rails new "$PWD/example" --minimal --skip-git --skip-bundle --skip-action-cable
+          cp packaging/smoke/Gemfile "$PWD/example/Gemfile"
+          cd "$PWD/example" && bundle install
+
+      - name: Pack
+        run: |
+          packaging/pack-linux.sh \
+            --app "$PWD/example" \
+            --runtime "$PWD/out/ruby" \
+            --gems "$PWD/out/gems" \
+            --name "Smoke" --app-id dev.turbodesktop.smoke \
+            --out "$PWD/dist"
+
+      - name: Launch it and talk to it
+        run: python3 packaging/smoke/launch_check.py dist/smoke/bin/smoke
+
+      - name: It runs from somewhere else entirely, and read-only
+        run: |
+          set -euo pipefail
+          # The tarball is the artifact people unpack wherever they like, often
+          # somewhere they cannot write. Both need to work.
+          mkdir -p /tmp/elsewhere && tar -C /tmp/elsewhere -xzf dist/smoke-linux-*.tar.gz
+          chmod -R a-w /tmp/elsewhere/smoke
+          python3 packaging/smoke/launch_check.py /tmp/elsewhere/smoke/bin/smoke
+          chmod -R u+w /tmp/elsewhere/smoke
+
+      - name: Sizes
+        run: du -sh out/ruby dist/smoke dist/smoke-linux-*.tar.gz | sed 's/^/  /'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smoke-linux
+          path: dist/*.tar.gz
+          retention-days: 7
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      # The interpreter that ships: RubyInstaller's portable archive, which
+      # already relocates (spike 3). Not built here, because building a second
+      # one would be work for its own sake.
+      - name: Fetch the portable interpreter
+        shell: pwsh
+        run: |
+          $v = "3.4.10"
+          curl.exe -fsSL -o ruby.7z `
+            "https://github.com/oneclick/rubyinstaller2/releases/download/RubyInstaller-$v-1/rubyinstaller-$v-1-x64.7z"
+          7z x ruby.7z -oC:\unpacked | Out-Null
+          $src = (Get-ChildItem C:\unpacked | Select-Object -First 1).FullName
+          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\out" | Out-Null
+          Copy-Item -Recurse $src "$env:GITHUB_WORKSPACE\out\ruby"
+          & "$env:GITHUB_WORKSPACE\out\ruby\bin\ruby.exe" -e 'require "psych"; require "openssl"; puts "OK #{RUBY_VERSION} #{RUBY_PLATFORM}"'
+
+      # A separate Ruby with a devkit, only to compile the gems. Several ship
+      # source-only on Windows (puma, io-console, nio4r), so a compiler is
+      # needed at build time. The end user never installs gems.
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+
+      - name: Generate a Rails app and build its gems
+        shell: pwsh
+        run: |
+          ridk version
+          New-Item -ItemType Directory -Force -Path C:\example | Out-Null
+          gem install railties --no-document
+          rails new C:\example --minimal --skip-git --skip-bundle --skip-action-cable
+          Copy-Item packaging\smoke\Gemfile C:\example\Gemfile -Force
+          # GEM_HOME, not BUNDLE_PATH. BUNDLE_PATH nests gems under
+          # ruby/<abi>/gems while GEM_HOME keeps them flat, and the launcher
+          # looks for flat — as macOS and Linux already produce.
+          $env:GEM_HOME = "$env:GITHUB_WORKSPACE\out\gems"
+          $env:GEM_PATH = "$env:GITHUB_WORKSPACE\out\gems"
+          Push-Location C:\example
+          bundle install
+          if ($LASTEXITCODE -ne 0) { throw "bundle install failed" }
+          Pop-Location
+
+      - name: Pack
+        shell: pwsh
+        run: |
+          packaging\pack-windows.ps1 -App C:\example `
+            -Runtime "$env:GITHUB_WORKSPACE\out\ruby" `
+            -Gems "$env:GITHUB_WORKSPACE\out\gems" `
+            -Name "Smoke" -AppId dev.turbodesktop.smoke `
+            -Out "$env:GITHUB_WORKSPACE\dist"
+
+      - name: Launch it with no toolchain present
+        shell: pwsh
+        run: |
+          # The shipping condition: hide every compiler, then run what we built.
+          foreach ($d in @("C:\msys64", "C:\mingw64")) {
+            if (Test-Path $d) { Rename-Item $d "$d-hidden" }
+          }
+          try {
+            python packaging\smoke\launch_check.py "$env:GITHUB_WORKSPACE\dist\smoke\smoke.cmd"
+            if ($LASTEXITCODE -ne 0) { throw "the packaged app did not hold to its contract" }
+          } finally {
+            foreach ($d in @("C:\msys64-hidden", "C:\mingw64-hidden")) {
+              if (Test-Path $d) { Rename-Item $d ($d -replace "-hidden$", "") }
+            }
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smoke-windows
+          path: dist/*.zip
+          retention-days: 7

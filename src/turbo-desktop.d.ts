@@ -227,6 +227,26 @@ export interface TurboDesktopAPI {
   };
 
   /** File system API for reading and writing files. Supports ~/ expansion. */
+  /**
+   * The frame around the page, which CSS cannot reach.
+   *
+   * `resize` honours the app's own config: a window declared non-resizable
+   * refuses, and the configured minimums win over a smaller request.
+   */
+  window: {
+    resize(width: number, height: number): Promise<BridgeResponse | null>;
+    minimize(): Promise<BridgeResponse | null>;
+    unminimize(): Promise<BridgeResponse | null>;
+    maximize(): Promise<BridgeResponse | null>;
+    unmaximize(): Promise<BridgeResponse | null>;
+    toggleMaximize(): Promise<BridgeResponse | null>;
+    fullscreen(enabled?: boolean): Promise<BridgeResponse | null>;
+    center(): Promise<BridgeResponse | null>;
+    alwaysOnTop(enabled?: boolean): Promise<BridgeResponse | null>;
+    focus(): Promise<BridgeResponse | null>;
+    state(): Promise<BridgeResponse | null>;
+  };
+
   fs: {
     /** Read a file's contents as a string. */
     read(

@@ -290,6 +290,68 @@
       },
     },
 
+    // ─── Window API ──────────────────────────────────────────────────────────
+    //
+    // The frame around the page, which CSS cannot reach. Layout, zoom and
+    // scrolling stay in the stylesheet where they belong; this is only the
+    // window itself.
+    //
+    //   import { TurboDesktop } from "turbo-desktop-bridge"
+    //   await TurboDesktop.window.resize(1200, 900)
+    //   await TurboDesktop.window.fullscreen(true)
+    //
+    // resize() honours the app's own config: a window declared non-resizable
+    // refuses, and the configured minimums win over a smaller request, so the
+    // page cannot produce a window nobody can use.
+
+    window: {
+      async resize(width, height) {
+        return TurboDesktop.sendBridgeMessage("window", "resize", { width, height });
+      },
+
+      async minimize() {
+        return TurboDesktop.sendBridgeMessage("window", "minimize", {});
+      },
+
+      async unminimize() {
+        return TurboDesktop.sendBridgeMessage("window", "unminimize", {});
+      },
+
+      async maximize() {
+        return TurboDesktop.sendBridgeMessage("window", "maximize", {});
+      },
+
+      async unmaximize() {
+        return TurboDesktop.sendBridgeMessage("window", "unmaximize", {});
+      },
+
+      async toggleMaximize() {
+        return TurboDesktop.sendBridgeMessage("window", "toggle-maximize", {});
+      },
+
+      async fullscreen(enabled = true) {
+        return TurboDesktop.sendBridgeMessage("window", "fullscreen", { enabled });
+      },
+
+      async center() {
+        return TurboDesktop.sendBridgeMessage("window", "center", {});
+      },
+
+      async alwaysOnTop(enabled = true) {
+        return TurboDesktop.sendBridgeMessage("window", "always-on-top", { enabled });
+      },
+
+      async focus() {
+        return TurboDesktop.sendBridgeMessage("window", "focus", {});
+      },
+
+      /** Current size and state. Unlike getWindowInfo(), this goes through the
+       *  bridge, so it works from any window and reports minimized too. */
+      async state() {
+        return TurboDesktop.sendBridgeMessage("window", "state", {});
+      },
+    },
+
     // ─── File System API ─────────────────────────────────────────────────────
 
     fs: {

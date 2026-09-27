@@ -70,7 +70,16 @@ pub fn ensure_trusted_caller(
         .url()
         .map_err(|e| format!("Could not determine the calling page: {}", e))?;
 
-    if is_trusted_origin(&config.server_url, &url) || is_bundled_app_origin(&url) {
+    // The address the app's own server announced counts as the app origin too,
+    // or a bundled app could not call a single native capability: its config
+    // carries a placeholder port, so nothing the window loads would match it.
+    let announced = crate::server::ServerAddress::announced(app);
+    if is_trusted_origin(&config.server_url, &url)
+        || is_bundled_app_origin(&url)
+        || announced
+            .as_deref()
+            .is_some_and(|address| is_trusted_origin(address, &url))
+    {
         return Ok(());
     }
 
@@ -101,6 +110,26 @@ pub enum LinkDestination {
 ///
 /// Non-web schemes — `mailto:`, `tel:` and the like — always leave.
 pub fn destination_for(server_url: &str, internal_hosts: &[String], url: &Url) -> LinkDestination {
+    destination_for_discovered(server_url, None, internal_hosts, url)
+}
+
+/// The same decision, for an app whose server announced its own address.
+///
+/// A bundled app cannot know its port when its config is written — the server
+/// binds 127.0.0.1:0 and reports where it landed — so `server_url` is a
+/// placeholder until the handshake arrives. Without consulting the address the
+/// server actually announced, the app's own pages read as someone else's site
+/// and get handed to the browser.
+pub fn destination_for_discovered(
+    server_url: &str,
+    discovered: Option<&str>,
+    internal_hosts: &[String],
+    url: &Url,
+) -> LinkDestination {
+    if discovered.is_some_and(|address| is_trusted_origin(address, url)) {
+        return LinkDestination::App;
+    }
+
     if is_trusted_origin(server_url, url) || is_bundled_app_origin(url) {
         return LinkDestination::App;
     }
@@ -419,6 +448,59 @@ mod tests {
             "https://example.com",
             &url("https://notexample.com/")
         ));
+    }
+
+    /// A packaged app's config can only carry a placeholder port, so its own
+    /// pages used to look like someone else's site: the window refused to load
+    /// them and the app opened in the system browser instead.
+    #[test]
+    fn the_address_the_server_announced_is_the_app() {
+        assert_eq!(
+            destination_for_discovered(
+                "http://127.0.0.1:0",
+                Some("http://127.0.0.1:61234"),
+                &[],
+                &url("http://127.0.0.1:61234/orders/1")
+            ),
+            LinkDestination::App
+        );
+    }
+
+    #[test]
+    fn a_different_port_on_this_machine_is_still_someone_else() {
+        // Loopback is not a licence: the port is part of the origin, and some
+        // other server on it is no more ours than a remote site is.
+        assert_eq!(
+            destination_for_discovered(
+                "http://127.0.0.1:0",
+                Some("http://127.0.0.1:61234"),
+                &[],
+                &url("http://127.0.0.1:61235/")
+            ),
+            LinkDestination::SystemBrowser
+        );
+    }
+
+    #[test]
+    fn nothing_announced_leaves_the_decision_as_it_was() {
+        assert_eq!(
+            destination_for_discovered(
+                "https://app.example.com",
+                None,
+                &[],
+                &url("https://app.example.com/orders/1")
+            ),
+            LinkDestination::App
+        );
+        assert_eq!(
+            destination_for_discovered(
+                "https://app.example.com",
+                None,
+                &[],
+                &url("https://news.example.org/article")
+            ),
+            LinkDestination::SystemBrowser
+        );
     }
 
     #[test]

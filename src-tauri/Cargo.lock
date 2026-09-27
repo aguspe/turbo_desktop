@@ -5520,6 +5520,7 @@ version = "0.2.2"
 dependencies = [
  "cocoa",
  "env_logger",
+ "getrandom 0.3.4",
  "log",
  "objc",
  "regex-lite",

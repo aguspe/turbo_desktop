@@ -1,0 +1,147 @@
+name: Release runtimes and platform gems
+
+# Push a tag, get downloadable artifacts for every platform.
+#
+# What this publishes is the *runtime* — the relocatable interpreter and the
+# platform gems that carry it — not an application. An app is packaged from
+# these by packaging/pack.sh, pack-linux.sh or pack-windows.ps1.
+#
+# macOS artifacts are signed ad-hoc. Without a Developer ID they would be
+# rejected by Gatekeeper anyway (see packaging/DISTRIBUTION.md), so nothing is
+# claimed here that has not been earned.
+
+on:
+  push:
+    tags: ["runtime-v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version for the gems, e.g. 0.1.0"
+        required: true
+        default: "0.1.0"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.triple }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-14,       triple: arm64-darwin }
+          - { os: macos-15-intel, triple: x86_64-darwin }
+          - { os: ubuntu-24.04,   triple: x86_64-linux }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq build-essential zlib1g-dev
+
+      - uses: actions/cache@v4
+        with:
+          path: .runtime-build/vendor
+          key: vendor-${{ matrix.triple }}-openssl3.5.4-libdir-yaml0.2.5
+
+      - name: Build
+        run: packaging/build-runtime.sh --out "$PWD/out/ruby"
+
+      - name: Verify it relocates
+        run: packaging/verify-runtime.sh "$PWD/out/ruby"
+
+      - name: Work out the version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "value=${GITHUB_REF_NAME#runtime-v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build the platform gem
+        run: |
+          packaging/gem.sh --runtime "$PWD/out/ruby" \
+            --triple "${{ matrix.triple }}" \
+            --version "${{ steps.version.outputs.value }}" \
+            --out "$PWD/dist"
+
+      - name: Tarball the raw interpreter too
+        run: tar -C out -czf "dist/ruby-${{ matrix.triple }}.tar.gz" ruby
+
+      - name: The gem installs and its interpreter works
+        run: |
+          set -euo pipefail
+          # Publishing a gem nobody has installed is how a broken release
+          # happens. Install it into a throwaway prefix and use it.
+          export GEM_HOME="$RUNNER_TEMP/gemcheck"
+          gem install "dist/turbo_desktop-runtime-${{ steps.version.outputs.value }}-${{ matrix.triple }}.gem" \
+            --no-document --ignore-dependencies
+          GEM_PATH="$GEM_HOME" ruby -e '
+            require "turbo_desktop/runtime"
+            abort "the gem carries no interpreter" unless TurboDesktop::Runtime.available?
+            puts "gem ships ruby #{TurboDesktop::Runtime.version} at #{TurboDesktop::Runtime.path}"
+          '
+          # Resolve the glob before running it, rather than using it as a
+          # command name, which shellcheck rightly objects to.
+          installed=$(echo "$GEM_HOME"/gems/*/runtime/ruby/bin/ruby)
+          "$installed" -e '
+            require "psych"; require "openssl"
+            abort "psych broken" unless Psych.load("- 1") == [1]
+            abort "openssl mismatch" unless OpenSSL::OPENSSL_VERSION == OpenSSL::OPENSSL_LIBRARY_VERSION
+            puts "installed interpreter works: psych #{Psych::VERSION}, #{OpenSSL::OPENSSL_VERSION}"
+          '
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.triple }}
+          path: dist/*
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch and check the portable interpreter
+        shell: pwsh
+        run: packaging/fetch-windows-runtime.ps1 -Out "$env:GITHUB_WORKSPACE\out\ruby"
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path "$env:GITHUB_WORKSPACE\out\ruby" -DestinationPath dist\ruby-x64-mingw-ucrt.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-x64-mingw-ucrt
+          path: dist/*
+
+  publish:
+    needs: [build, windows]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Collect
+        run: |
+          mkdir -p release && find artifacts -type f \( -name '*.gem' -o -name '*.tar.gz' -o -name '*.zip' \) -exec mv {} release/ \;
+          find release -type f -exec du -h {} + | sed 's/^/  /'
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
+          body: |
+            Relocatable Ruby runtimes and the platform gems that carry them.
+
+            These are the interpreter a packaged app ships, not an application.
+            Package an app from them with `packaging/pack.sh` (macOS),
+            `pack-linux.sh`, or `pack-windows.ps1`.
+
+            Each build is verified before publication: nothing links into a
+            package manager, psych and OpenSSL do real work from a relocated
+            path, and the built and runtime OpenSSL versions agree.

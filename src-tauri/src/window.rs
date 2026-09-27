@@ -434,6 +434,178 @@ pub fn save_preferences(dir: &Path, preferences: &Preferences) -> Result<(), Str
 mod tests {
     use super::*;
 
+    fn resizable() -> WindowConfig {
+        WindowConfig {
+            width: 1000.0,
+            height: 800.0,
+            min_width: 400.0,
+            min_height: 300.0,
+            resizable: true,
+        }
+    }
+
+    #[test]
+    fn a_resize_passes_through_when_it_is_big_enough() {
+        assert_eq!(
+            resolve_size(&resizable(), 1200.0, 900.0).unwrap(),
+            (1200.0, 900.0)
+        );
+    }
+
+    #[test]
+    fn the_configured_minimums_win_over_a_smaller_request() {
+        // A page asking for 100x100 should get a window someone can still use,
+        // not one the app declared too small to be usable.
+        assert_eq!(
+            resolve_size(&resizable(), 100.0, 100.0).unwrap(),
+            (400.0, 300.0)
+        );
+    }
+
+    #[test]
+    fn a_window_declared_fixed_stays_fixed() {
+        let config = WindowConfig {
+            resizable: false,
+            ..resizable()
+        };
+        assert!(resolve_size(&config, 1200.0, 900.0).is_err());
+    }
+
+    #[test]
+    fn nonsense_sizes_are_refused_rather_than_applied() {
+        for (w, h) in [
+            (0.0, 600.0),
+            (-10.0, 600.0),
+            (f64::NAN, 600.0),
+            (800.0, f64::INFINITY),
+        ] {
+            assert!(
+                resolve_size(&resizable(), w, h).is_err(),
+                "{}x{} should have been refused",
+                w,
+                h
+            );
+        }
+    }
+
+    // ─── the window component ───────────────────────────────────────────────
+    //
+    // resolve_size above is the rule on its own. These drive the component the
+    // way both callers do — a page, and the app's Rails process over the
+    // control channel — against a window from the mock runtime, so the reply
+    // that goes back over the wire is the thing under test.
+
+    /// A shell with one window and a config for the component to answer to.
+    /// The app comes back because dropping it takes the window with it.
+    fn mock_shell(window: WindowConfig) -> tauri::App<tauri::test::MockRuntime> {
+        use tauri::Manager;
+
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("the mock shell should build");
+        tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("the mock shell should have a main window");
+
+        // Through the app's own parser, so the minimums under test are the ones
+        // a real config would get.
+        let mut config = parse_config(r#"{"server_url":"http://127.0.0.1:3000"}"#)
+            .expect("the minimal config should parse");
+        config.window = window;
+        app.manage(config);
+        app
+    }
+
+    /// Exactly what `TurboDesktop::Native.call("window", "resize", ...)` puts on
+    /// the control channel, parsed the way `control::serve` parses it. Going
+    /// through the wire format rather than building the struct by hand is the
+    /// point: it is what proves Ruby's payload arrives whole.
+    fn from_the_wire(body: &str) -> crate::bridge::BridgeMessage {
+        serde_json::from_str(body).expect("the control channel should parse this body")
+    }
+
+    fn call(
+        app: &tauri::App<tauri::test::MockRuntime>,
+        body: &str,
+    ) -> Result<serde_json::Value, String> {
+        let message = from_the_wire(body);
+        tauri::async_runtime::block_on(handle_window(app.handle(), &message))
+    }
+
+    #[test]
+    fn a_resize_from_ruby_is_applied_and_the_size_reported_back() {
+        let app = mock_shell(WindowConfig::default());
+
+        let reply = call(
+            &app,
+            r#"{"component":"window","event":"resize","data":{"width":1200,"height":900}}"#,
+        )
+        .expect("the resize should be accepted");
+
+        assert_eq!(reply["status"], "ok");
+        assert_eq!(reply["width"], 1200.0);
+        assert_eq!(reply["height"], 900.0);
+    }
+
+    #[test]
+    fn the_configured_minimums_bind_a_call_from_ruby_too() {
+        // The rule belongs to the app, not to the page, so it has to hold on
+        // the channel a Rails process uses and not only on the page's.
+        let app = mock_shell(WindowConfig::default());
+
+        let reply = call(
+            &app,
+            r#"{"component":"window","event":"resize","data":{"width":100,"height":100}}"#,
+        )
+        .expect("a too-small request is clamped, not refused");
+
+        assert_eq!(reply["width"], 800.0, "the configured minimum width");
+        assert_eq!(reply["height"], 600.0, "the configured minimum height");
+    }
+
+    #[test]
+    fn a_refusal_carries_its_reason_back_to_the_caller() {
+        // Ruby turns this into Native::CallFailed, so the reason has to be in
+        // the message rather than only in the shell's log.
+        let app = mock_shell(WindowConfig {
+            resizable: false,
+            ..WindowConfig::default()
+        });
+
+        let error = call(
+            &app,
+            r#"{"component":"window","event":"resize","data":{"width":1200,"height":900}}"#,
+        )
+        .expect_err("a fixed window should refuse");
+
+        assert!(error.contains("not resizable"), "unhelpful: {}", error);
+    }
+
+    #[test]
+    fn a_message_without_a_window_label_means_the_main_window() {
+        // Ruby never sends one: a Rails process is not a page and has no window
+        // of its own. Defaulting is what lets it call at all.
+        let app = mock_shell(WindowConfig::default());
+
+        let reply = call(&app, r#"{"component":"window","event":"state","data":{}}"#)
+            .expect("state should answer");
+
+        assert_eq!(reply["label"], "main");
+    }
+
+    #[test]
+    fn an_event_the_component_does_not_know_is_not_silently_an_ok() {
+        let app = mock_shell(WindowConfig::default());
+
+        let reply = call(
+            &app,
+            r#"{"component":"window","event":"teleport","data":{}}"#,
+        )
+        .expect("an unknown event is answered, not an error");
+
+        assert_eq!(reply["status"], "unknown_event");
+    }
+
     fn scratch(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("turbo-desktop-config-{name}"));
         std::fs::remove_dir_all(&dir).ok();
@@ -768,8 +940,16 @@ pub fn apply_shell_defaults<'a, M: tauri::Manager<tauri::Wry>>(
     builder
         .user_agent(&config.user_agent)
         .initialization_script(&globals)
+        // Asked at navigation time rather than captured here: a bundled app
+        // learns its own origin from the server after this window is built.
         .on_navigation(move |url| {
-            match crate::security::destination_for(&navigation_server, &navigation_hosts, url) {
+            let announced = crate::server::ServerAddress::announced(&navigation_app);
+            match crate::security::destination_for_discovered(
+                &navigation_server,
+                announced.as_deref(),
+                &navigation_hosts,
+                url,
+            ) {
                 crate::security::LinkDestination::App => true,
                 crate::security::LinkDestination::SystemBrowser => {
                     crate::open_externally(&navigation_app, url);
@@ -778,7 +958,13 @@ pub fn apply_shell_defaults<'a, M: tauri::Manager<tauri::Wry>>(
             }
         })
         .on_new_window(move |url, _features| {
-            match crate::security::destination_for(&server_url, &internal_hosts, &url) {
+            let announced = crate::server::ServerAddress::announced(&new_window_app);
+            match crate::security::destination_for_discovered(
+                &server_url,
+                announced.as_deref(),
+                &internal_hosts,
+                &url,
+            ) {
                 crate::security::LinkDestination::App => tauri::webview::NewWindowResponse::Allow,
                 crate::security::LinkDestination::SystemBrowser => {
                     crate::open_externally(&new_window_app, &url);
@@ -822,6 +1008,117 @@ pub fn deliver_to_all<R: tauri::Runtime>(
 
     for window in app.webview_windows().values() {
         deliver_to_page(window, kind, payload);
+    }
+}
+
+/// What size a resize request should actually produce, or why it is refused.
+///
+/// Kept separate from the window so the rules can be tested without one. Two
+/// rules, both taken from the app's own config rather than invented here: a
+/// window the app declared non-resizable stays that way, and the configured
+/// minimums win over a smaller request. A page asking for 100x100 gets the
+/// minimum, not a window nobody can use.
+pub fn resolve_size(config: &WindowConfig, width: f64, height: f64) -> Result<(f64, f64), String> {
+    if !config.resizable {
+        return Err("Refused: this window is configured as not resizable".to_string());
+    }
+    if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
+        return Err(format!(
+            "Refused: {}x{} is not a usable size",
+            width, height
+        ));
+    }
+    Ok((width.max(config.min_width), height.max(config.min_height)))
+}
+
+/// Native window control, exposed as the `window` bridge component.
+///
+/// Everything here is something the browser genuinely cannot do. Zoom, scroll
+/// and layout stay in CSS where they belong; this is only the frame around them.
+///
+/// Both callers of `bridge::dispatch` land here: a page over the webview, and
+/// the app's own Rails process over the control channel. Generic over the
+/// runtime so the rules can be driven by the mock one in tests — the real
+/// runtime needs a window server and a main thread, neither of which a unit
+/// test has.
+pub async fn handle_window<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    message: &crate::bridge::BridgeMessage,
+) -> Result<serde_json::Value, String> {
+    use tauri::Manager;
+
+    let label = message.window_label.as_deref().unwrap_or("main");
+    let window = app
+        .get_webview_window(label)
+        .ok_or_else(|| format!("No window labelled '{}'", label))?;
+
+    let flag = |name: &str| -> bool { message.data[name].as_bool().unwrap_or(true) };
+
+    // Most of these are fire-and-forget: do the thing, report ok. Naming the
+    // shape once keeps the match arms readable.
+    let done = |result: tauri::Result<()>| -> Result<serde_json::Value, String> {
+        result.map_err(|e| e.to_string())?;
+        Ok(serde_json::json!({ "status": "ok" }))
+    };
+
+    match message.event.as_str() {
+        "resize" => {
+            let config = app.state::<TurboDesktopConfig>();
+            let width = message.data["width"]
+                .as_f64()
+                .ok_or("Missing 'width' in window resize")?;
+            let height = message.data["height"]
+                .as_f64()
+                .ok_or("Missing 'height' in window resize")?;
+            let (width, height) = resolve_size(&config.window, width, height)?;
+            window
+                .set_size(tauri::LogicalSize::new(width, height))
+                .map_err(|e| format!("Could not resize the window: {}", e))?;
+            Ok(serde_json::json!({ "status": "ok", "width": width, "height": height }))
+        }
+        "minimize" => done(window.minimize()),
+        "unminimize" => done(window.unminimize()),
+        "maximize" => done(window.maximize()),
+        "unmaximize" => done(window.unmaximize()),
+        "center" => done(window.center()),
+        "focus" => done(window.set_focus()),
+        "toggle-maximize" | "toggle_maximize" => {
+            let maximized = window.is_maximized().map_err(|e| e.to_string())?;
+            if maximized {
+                window.unmaximize()
+            } else {
+                window.maximize()
+            }
+            .map_err(|e| e.to_string())?;
+            Ok(serde_json::json!({ "status": "ok", "isMaximized": !maximized }))
+        }
+        "fullscreen" => {
+            let enabled = flag("enabled");
+            window.set_fullscreen(enabled).map_err(|e| e.to_string())?;
+            Ok(serde_json::json!({ "status": "ok", "isFullscreen": enabled }))
+        }
+        "always-on-top" | "always_on_top" => {
+            let enabled = flag("enabled");
+            window
+                .set_always_on_top(enabled)
+                .map_err(|e| e.to_string())?;
+            Ok(serde_json::json!({ "status": "ok", "isAlwaysOnTop": enabled }))
+        }
+        "state" => {
+            let size = window.inner_size().map_err(|e| e.to_string())?;
+            let scale = window.scale_factor().map_err(|e| e.to_string())?;
+            Ok(serde_json::json!({
+                "status": "ok",
+                "label": window.label(),
+                "width": (size.width as f64) / scale,
+                "height": (size.height as f64) / scale,
+                "isFullscreen": window.is_fullscreen().map_err(|e| e.to_string())?,
+                "isMaximized": window.is_maximized().map_err(|e| e.to_string())?,
+                "isMinimized": window.is_minimized().map_err(|e| e.to_string())?,
+                "scaleFactor": scale,
+            }))
+        }
+        _ => Ok(serde_json::json!({ "status": "unknown_event" })),
     }
 }
 
