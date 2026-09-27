@@ -259,3 +259,50 @@ test("the documentation pages quote the current version", () => {
     }
   }
 });
+
+const READMES = [["README.md"], ["turbo_desktop-rails", "README.md"]];
+
+test("the READMEs tell readers to pin the gem the way the CLI does", () => {
+  for (const readme of READMES) {
+    const lines = read(...readme)
+      .split("\n")
+      .filter((line) => /^\s*gem ["']turbo_desktop-rails["']/.test(line));
+
+    assert.ok(lines.length > 0, `${readme.join("/")} should show the Gemfile line`);
+    for (const line of lines) {
+      assert.ok(
+        line.includes(`"${gemConstraint()}"`),
+        `${readme.join("/")} shows \`${line.trim()}\`; unpinned, Bundler can resolve to an ancient version`
+      );
+    }
+  }
+});
+
+test("the READMEs quote the current version", () => {
+  for (const readme of READMES) {
+    const quoted = [...read(...readme).matchAll(/(?:Turbo Desktop\/|\bv)(\d+\.\d+\.\d+)/g)].map(
+      (match) => match[1]
+    );
+
+    for (const version of quoted) {
+      assert.equal(version, packageVersion(), `${readme.join("/")} quotes ${version}`);
+    }
+  }
+});
+
+test("the gem's README states the Ruby version the gemspec requires", () => {
+  const gemspec = read("turbo_desktop-rails", "turbo_desktop-rails.gemspec");
+  const required = gemspec.match(/required_ruby_version\s*=\s*">=\s*(\d+\.\d+)/);
+  const stated = read("turbo_desktop-rails", "README.md").match(/Ruby >= (\d+\.\d+)/);
+
+  assert.ok(required, "the gemspec should declare required_ruby_version");
+  assert.ok(stated, "the gem's README should state a Ruby version");
+  assert.equal(stated[1], required[1], "the README and the gemspec disagree about the Ruby floor");
+});
+
+test("the README's Docs link opens the documentation, not the README again", () => {
+  const link = read("README.md").match(/<a href="([^"]+)">Docs<\/a>/);
+
+  assert.ok(link, "README.md should link to the docs");
+  assert.equal(link[1], "https://aguspe.github.io/turbo_desktop/docs/");
+});

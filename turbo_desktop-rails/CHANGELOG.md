@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.3 (2026-09-27)
+
+### Fixed
+
+- The Dev Inspector now loads in apps with forgery protection on, which is
+  every app that uses `load_defaults`. Its modules are fetched with `import()`,
+  a plain GET for JavaScript, which Rails refused with a 422 as a cross-origin
+  script embed. The inspector's controller serves a fixed list of public,
+  static files and no longer takes part in that check.
+
+### Changed
+
+- The README shows the Gemfile line pinned (`"~> 0.2"`), states Ruby >= 3.2 to
+  match the gemspec, and quotes a current User-Agent.
+
 ## 0.2.2 (2026-09-27)
 
 Version aligned with the desktop shell's 0.2.2 release. The CLI now scaffolds

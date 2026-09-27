@@ -21,7 +21,7 @@
   <a href="#bridge-components">Bridge</a> •
   <a href="#rails-gem">Rails Gem</a> •
   <a href="#comparison">Comparison</a> •
-  <a href="https://aguspe.github.io/turbo_desktop/">Docs</a>
+  <a href="https://aguspe.github.io/turbo_desktop/docs/">Docs</a>
 </p>
 
 <p align="center">
@@ -205,7 +205,7 @@ Omit `command` (or the whole block) to manage the server yourself.
 
 ```ruby
 # Gemfile
-gem "turbo_desktop-rails"
+gem "turbo_desktop-rails", "~> 0.2"
 ```
 
 ```bash
@@ -729,7 +729,7 @@ Ship native installers for macOS, Windows, and Linux by pushing a git tag — th
 draft GitHub Release:
 
 ```bash
-git tag v0.1.0 && git push origin v0.1.0
+git tag v0.2.3 && git push origin v0.2.3
 ```
 
 See **[docs/DISTRIBUTION.md](docs/DISTRIBUTION.md)** for local builds, using it in your own app,
