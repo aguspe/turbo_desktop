@@ -459,15 +459,90 @@ test("two components on a page each speak for themselves", async () => {
   assert.deepEqual(names, ["notification", "clipboard"]);
 });
 
-test("a notification is accepted by the shell", async () => {
-  const response = await browser.executeAsync((done) => {
-    window.TurboDesktop.sendBridgeMessage("notification", "connect", {
-      title: "E2E",
-      body: "Hello",
-    }).then(done);
+async function bridge(component, event, data = {}) {
+  // As a list: WebDriver takes a returned object with an `error` key for a
+  // failure of its own, and a component that cannot do its job says so there.
+  const [status, rest] = await browser.executeAsync(
+    (component, event, data, done) => {
+      window.TurboDesktop.sendBridgeMessage(component, event, data).then((response) => {
+        if (!response) return done([null, {}]);
+        const { status, error: reason, ...rest } = response;
+        done([status, { ...rest, reason }]);
+      });
+    },
+    component,
+    event,
+    data
+  );
+
+  return { status, ...rest };
+}
+
+// The machine running this may have nothing to show a notification with, or
+// no dock to badge. What is checked is that the shell tried, rather than
+// answering "ok" and doing nothing, which is what these four used to do.
+test("a notification is shown, or the page is told it cannot be", async () => {
+  await startOver();
+
+  const response = await bridge("notification", "show", { title: "E2E", body: "Hello" });
+
+  assert.ok(["shown", "unavailable"].includes(response.status), JSON.stringify(response));
+});
+
+test("a component saying goodbye is not shown as a notification", async () => {
+  assert.equal((await bridge("notification", "disconnect", {})).status, "ignored");
+  assert.equal((await bridge("notification", "connect", {})).status, "ignored");
+});
+
+test("the badge is set and cleared", async () => {
+  const set = await bridge("badge", "set", { count: 3 });
+  assert.ok(["updated", "unavailable"].includes(set.status), JSON.stringify(set));
+  if (set.status === "updated") assert.equal(set.count, 3);
+
+  const cleared = await bridge("badge", "set", { count: 0 });
+  if (cleared.status === "updated") assert.equal(cleared.count, 0);
+});
+
+test("a menu item a page registers is in the menu bar", async () => {
+  const registered = await bridge("menu-item", "connect", {
+    id: "export",
+    title: "Export PDF",
+    shortcut: "CmdOrCtrl+E",
+  });
+  assert.equal(registered.status, "registered", JSON.stringify(registered));
+
+  const { items } = await bridge("menu-item", "list");
+  assert.deepEqual(items, [{ id: "export", title: "Export PDF" }]);
+});
+
+test("registering a menu item again replaces it", async () => {
+  await bridge("menu-item", "connect", { id: "export", title: "Export as PDF" });
+
+  const { items } = await bridge("menu-item", "list");
+  assert.deepEqual(items, [{ id: "export", title: "Export as PDF" }]);
+});
+
+test("a menu item can be taken away", async () => {
+  await bridge("menu-item", "unregister", { id: "export" });
+
+  const { items } = await bridge("menu-item", "list");
+  assert.deepEqual(items, []);
+});
+
+test("a global shortcut is registered, or the page is told it cannot be", async () => {
+  const response = await bridge("shortcut", "register", {
+    id: "quick-add",
+    accelerator: "CmdOrCtrl+Shift+K",
   });
 
-  assert.ok(response, "the shell refused the notification");
+  assert.ok(["registered", "unavailable"].includes(response.status), JSON.stringify(response));
+  await bridge("shortcut", "unregister", { accelerator: "CmdOrCtrl+Shift+K" });
+});
+
+test("something that is not a shortcut is refused", async () => {
+  const response = await bridge("shortcut", "register", { id: "bad", accelerator: "Banana+Q" });
+
+  assert.equal(response.status, null, "the shell accepted a shortcut that does not parse");
 });
 
 test("launch at login can be turned on and off", async () => {

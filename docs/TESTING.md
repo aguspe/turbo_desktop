@@ -34,7 +34,10 @@ quits is not done until it is covered there.
 | `none` | `a rule of none leaves the link to a bridge component` |
 | External links leave the app alone | `a link to another site leaves the app where it is` |
 | Bridge components keep their names | `two components on a page each speak for themselves` |
-| Notifications | `a notification is accepted by the shell` |
+| Notifications | `a notification is shown, or the page is told it cannot be`, `a component saying goodbye is not shown…` |
+| Badge | `the badge is set and cleared` |
+| Menu items | `a menu item a page registers is in the menu bar`, and replacing and removing one |
+| Global shortcuts | `a global shortcut is registered…`, `something that is not a shortcut is refused` |
 | Launch at login | `launch at login can be turned on and off` |
 | Clipboard | `clipboard text survives a write/read round trip` |
 | A picked path is granted | `a save-dialog pick makes the path writable and readable` |

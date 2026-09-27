@@ -22,6 +22,9 @@ changes. What changed in the shell:
   left before it had.
 - Ctrl+C on `turbo-desktop dev`, or a `kill`, quits the app properly rather
   than ending it where it stands and leaving the server behind.
+- The `notification`, `badge`, `menu-item` and `shortcut` components do what
+  they say. They answered "ok" and did nothing: no notification appeared, no
+  badge was set, no menu item or shortcut was registered.
 - Two bridge controllers on one page keep their own component names.
 - In development, the error page opens in the app rather than in the browser.
 - The offline banner goes away when the next request succeeds.

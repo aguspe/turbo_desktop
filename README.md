@@ -294,6 +294,28 @@ The Bridge is the desktop equivalent of **Strada**. It lets your web components 
 | `file-open` | Files opened with the app, even from a cold launch |
 | `updater` | Check for and install app updates |
 
+A component that cannot do its job on the machine it is running on (no
+notification service, a shortcut another application holds) answers with
+`status: "unavailable"` and the reason, rather than failing.
+
+Menu items a page registers go into an **Actions** menu, and choosing one
+sends `{ event: "clicked", data: { id } }` to the `menu-item` component. A
+global shortcut sends `{ event: "triggered", data: { id, accelerator } }` to
+the `shortcut` component, whether or not the app is in front:
+
+```js
+TurboDesktop.sendBridgeMessage("menu-item", "connect", {
+  id: "export", title: "Export PDF", shortcut: "CmdOrCtrl+E"
+})
+TurboDesktop.sendBridgeMessage("shortcut", "register", {
+  id: "quick-add", accelerator: "CmdOrCtrl+Shift+K"
+})
+TurboDesktop.sendBridgeMessage("badge", "set", { count: 3 })   // 0 clears it
+TurboDesktop.sendBridgeMessage("notification", "show", {
+  title: "Task done", body: "Set up Turbo Desktop"
+})
+```
+
 Each has a JavaScript API on `TurboDesktop` (`TurboDesktop.fs`, `.shell`,
 `.clipboard`, and so on), typed in `src/turbo-desktop.d.ts` and in the
 [`turbo-desktop-bridge`](packages/bridge) npm package.

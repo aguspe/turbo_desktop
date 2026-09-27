@@ -48,6 +48,23 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, event| {
+                    use tauri::Manager;
+                    use tauri_plugin_global_shortcut::ShortcutState;
+
+                    if event.state() != ShortcutState::Pressed {
+                        return;
+                    }
+                    let registered = app.state::<bridge::RegisteredShortcuts>();
+                    if let Some((id, accelerator)) = registered.named(shortcut.id()) {
+                        bridge::shortcut_pressed(app, &id, &accelerator);
+                    }
+                })
+                .build(),
+        )
+        .manage(bridge::RegisteredShortcuts::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_autostart::init(

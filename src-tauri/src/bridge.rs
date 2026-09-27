@@ -110,21 +110,91 @@ pub fn broadcast_response(app: &tauri::AppHandle, response: &BridgeResponse) {
 
 // ─── Built-in Bridge Component Handlers ─────────────────────────────────────
 
+/// Whether a message to the notification component asks for one to be shown.
+///
+/// A component says goodbye when its element leaves the page, and may say
+/// hello with nothing in its hands. Neither is news.
+pub fn asks_for_a_notification(event: &str, data: &serde_json::Value) -> bool {
+    if event == "disconnect" {
+        return false;
+    }
+
+    ["title", "body"]
+        .iter()
+        .any(|key| data[*key].as_str().is_some_and(|text| !text.trim().is_empty()))
+}
+
 async fn handle_notification(
     app: &tauri::AppHandle,
     message: &BridgeMessage,
 ) -> Result<serde_json::Value, String> {
-    let title = message.data["title"].as_str().unwrap_or("Notification");
-    let body = message.data["body"].as_str().unwrap_or("");
+    use tauri_plugin_notification::NotificationExt;
 
-    // Use tauri-plugin-notification
-    app.emit(
-        "show-notification",
-        serde_json::json!({ "title": title, "body": body }),
-    )
-    .map_err(|e| format!("{}", e))?;
+    if !asks_for_a_notification(&message.event, &message.data) {
+        return Ok(serde_json::json!({ "status": "ignored" }));
+    }
 
-    Ok(serde_json::json!({ "status": "shown" }))
+    let title = message.data["title"].as_str().unwrap_or("").trim();
+    let body = message.data["body"].as_str().unwrap_or("").trim();
+
+    let mut notification = app.notification().builder();
+    if !title.is_empty() {
+        notification = notification.title(title);
+    }
+    if !body.is_empty() {
+        notification = notification.body(body);
+    }
+
+    // A machine with nothing to show notifications with is not an error in the
+    // app. The page is told, so it can say the thing some other way.
+    match notification.show() {
+        Ok(()) => Ok(serde_json::json!({ "status": "shown" })),
+        Err(e) => {
+            log::warn!("Could not show a notification: {}", e);
+            Ok(serde_json::json!({ "status": "unavailable", "error": e.to_string() }))
+        }
+    }
+}
+
+/// The submenu items registered by pages are kept in.
+pub const BRIDGE_MENU_ID: &str = "bridge-actions";
+const BRIDGE_ITEM_PREFIX: &str = "bridge-item:";
+
+/// The menu id for an item a page registers: its `id`, or failing that its
+/// title. Registering the same one again replaces it, so a controller that
+/// reconnects after a Turbo visit does not leave a second copy behind.
+pub fn menu_item_id(data: &serde_json::Value) -> Option<String> {
+    ["id", "title"]
+        .iter()
+        .filter_map(|key| data[*key].as_str())
+        .map(str::trim)
+        .find(|name| !name.is_empty())
+        .map(|name| format!("{BRIDGE_ITEM_PREFIX}{name}"))
+}
+
+/// The page's name for the item a menu event came from, if a page registered it.
+pub fn bridge_item_for_menu_event(event_id: &str) -> Option<&str> {
+    event_id
+        .strip_prefix(BRIDGE_ITEM_PREFIX)
+        .filter(|name| !name.is_empty())
+}
+
+fn bridge_submenu(app: &tauri::AppHandle) -> Result<tauri::menu::Submenu<tauri::Wry>, String> {
+    let menu = app
+        .menu()
+        .ok_or_else(|| "The app has no menu bar".to_string())?;
+
+    if let Some(existing) = menu.get(BRIDGE_MENU_ID).and_then(|kind| kind.as_submenu().cloned()) {
+        return Ok(existing);
+    }
+
+    let submenu = tauri::menu::SubmenuBuilder::with_id(app, BRIDGE_MENU_ID, "Actions")
+        .build()
+        .map_err(|e| format!("Could not create the Actions menu: {}", e))?;
+    menu.append(&submenu)
+        .map_err(|e| format!("Could not add the Actions menu: {}", e))?;
+
+    Ok(submenu)
 }
 
 async fn handle_menu_item(
@@ -132,24 +202,79 @@ async fn handle_menu_item(
     message: &BridgeMessage,
 ) -> Result<serde_json::Value, String> {
     match message.event.as_str() {
-        "connect" => {
-            let title = message.data["title"].as_str().unwrap_or("Menu Item");
+        "connect" | "register" => {
+            let Some(id) = menu_item_id(&message.data) else {
+                // A component connecting with nothing to register yet.
+                return Ok(serde_json::json!({ "status": "ignored" }));
+            };
+            let title = message.data["title"]
+                .as_str()
+                .map(str::trim)
+                .filter(|title| !title.is_empty())
+                .unwrap_or_else(|| bridge_item_for_menu_event(&id).unwrap_or("Menu Item"));
 
-            log::info!("Bridge: registering menu item '{}'", title);
+            let submenu = bridge_submenu(app)?;
+            if let Some(existing) = submenu.get(&id) {
+                let _ = submenu.remove(&existing);
+            }
 
-            // Emit event so the menu system can pick it up
-            app.emit("bridge-menu-item-register", &message.data)
-                .map_err(|e| format!("{}", e))?;
+            let mut item = tauri::menu::MenuItemBuilder::with_id(id.clone(), title);
+            if let Some(shortcut) = message.data["shortcut"].as_str().filter(|s| !s.is_empty()) {
+                item = item.accelerator(shortcut);
+            }
+            let item = item
+                .build(app)
+                .map_err(|e| format!("Could not create the menu item: {}", e))?;
+            submenu
+                .append(&item)
+                .map_err(|e| format!("Could not add the menu item: {}", e))?;
 
-            Ok(serde_json::json!({ "status": "registered" }))
+            log::info!("Bridge: menu item '{}' registered", title);
+            Ok(serde_json::json!({ "status": "registered", "id": bridge_item_for_menu_event(&id) }))
         }
-        "disconnect" => {
-            app.emit("bridge-menu-item-unregister", &message.data)
-                .map_err(|e| format!("{}", e))?;
+        "unregister" | "disconnect" => {
+            let Some(id) = menu_item_id(&message.data) else {
+                return Ok(serde_json::json!({ "status": "ignored" }));
+            };
+            let submenu = bridge_submenu(app)?;
+            if let Some(existing) = submenu.get(&id) {
+                submenu
+                    .remove(&existing)
+                    .map_err(|e| format!("Could not remove the menu item: {}", e))?;
+            }
             Ok(serde_json::json!({ "status": "unregistered" }))
+        }
+        "list" => {
+            let submenu = bridge_submenu(app)?;
+            let items: Vec<serde_json::Value> = submenu
+                .items()
+                .map_err(|e| format!("Could not read the menu: {}", e))?
+                .iter()
+                .filter_map(|kind| kind.as_menuitem())
+                .map(|item| {
+                    serde_json::json!({
+                        "id": bridge_item_for_menu_event(item.id().as_ref()),
+                        "title": item.text().unwrap_or_default(),
+                    })
+                })
+                .collect();
+            Ok(serde_json::json!({ "status": "ok", "items": items }))
         }
         _ => Ok(serde_json::json!({ "status": "unknown_event" })),
     }
+}
+
+/// Tell the pages that a menu item one of them registered was chosen.
+pub fn menu_item_chosen<R: tauri::Runtime>(app: &tauri::AppHandle<R>, name: &str) {
+    crate::window::deliver_to_all(
+        app,
+        "bridge-response",
+        &serde_json::json!({
+            "component": "menu-item",
+            "event": "clicked",
+            "data": { "id": name },
+        }),
+    );
 }
 
 async fn handle_file_picker(
@@ -242,40 +367,114 @@ async fn handle_file_picker(
     }
 }
 
+/// The count the dock or taskbar badge should show. Nothing clears it.
+pub fn badge_count(data: &serde_json::Value) -> Option<i64> {
+    data["count"].as_i64().filter(|count| *count > 0)
+}
+
 async fn handle_badge(
     app: &tauri::AppHandle,
     message: &BridgeMessage,
 ) -> Result<serde_json::Value, String> {
-    let count = message.data["count"].as_u64().unwrap_or(0);
-    log::info!("Bridge: setting dock badge to {}", count);
+    use tauri::Manager;
 
-    #[cfg(target_os = "macos")]
-    {
-        // macOS dock badge via Cocoa API
-        app.emit("bridge-badge-update", count)
-            .map_err(|e| format!("{}", e))?;
+    let count = badge_count(&message.data);
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "There is no main window to badge".to_string())?;
+
+    match window.set_badge_count(count) {
+        Ok(()) => Ok(serde_json::json!({ "status": "updated", "count": count.unwrap_or(0) })),
+        Err(e) => {
+            log::warn!("Could not set the badge: {}", e);
+            Ok(serde_json::json!({ "status": "unavailable", "error": e.to_string() }))
+        }
     }
+}
 
-    Ok(serde_json::json!({ "status": "updated", "count": count }))
+/// The shortcuts pages have registered, by the accelerator they fire on.
+#[derive(Default)]
+pub struct RegisteredShortcuts(std::sync::Mutex<std::collections::HashMap<u32, (String, String)>>);
+
+impl RegisteredShortcuts {
+    /// The page's id and accelerator for a shortcut that fired.
+    pub fn named(&self, shortcut_id: u32) -> Option<(String, String)> {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&shortcut_id)
+            .cloned()
+    }
+}
+
+/// Tell the pages that a shortcut one of them registered was pressed.
+pub fn shortcut_pressed<R: tauri::Runtime>(app: &tauri::AppHandle<R>, id: &str, accelerator: &str) {
+    crate::window::deliver_to_all(
+        app,
+        "bridge-response",
+        &serde_json::json!({
+            "component": "shortcut",
+            "event": "triggered",
+            "data": { "id": id, "accelerator": accelerator },
+        }),
+    );
 }
 
 async fn handle_shortcut(
     app: &tauri::AppHandle,
     message: &BridgeMessage,
 ) -> Result<serde_json::Value, String> {
+    use tauri::Manager;
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
+
+    let accelerator = message.data["accelerator"].as_str().unwrap_or("").trim();
+
     match message.event.as_str() {
-        "register" => {
-            let accelerator = message.data["accelerator"]
-                .as_str()
-                .unwrap_or("");
-            let id = message.data["id"].as_str().unwrap_or("");
+        "register" | "connect" => {
+            if accelerator.is_empty() {
+                return Ok(serde_json::json!({ "status": "ignored" }));
+            }
+            let shortcut: Shortcut = accelerator
+                .parse()
+                .map_err(|e| format!("'{}' is not a shortcut: {}", accelerator, e))?;
+            let id = message.data["id"].as_str().unwrap_or(accelerator).to_string();
 
-            log::info!("Bridge: registering shortcut '{}' -> '{}'", accelerator, id);
+            let registered = app.state::<RegisteredShortcuts>();
+            // Registering again, as a controller does when it reconnects.
+            let _ = app.global_shortcut().unregister(shortcut);
 
-            app.emit("bridge-shortcut-register", &message.data)
-                .map_err(|e| format!("{}", e))?;
+            match app.global_shortcut().register(shortcut) {
+                Ok(()) => {
+                    registered
+                        .0
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .insert(shortcut.id(), (id.clone(), accelerator.to_string()));
+                    log::info!("Bridge: shortcut '{}' registered as '{}'", accelerator, id);
+                    Ok(serde_json::json!({ "status": "registered", "id": id }))
+                }
+                // Usually another application holding it.
+                Err(e) => {
+                    log::warn!("Could not register '{}': {}", accelerator, e);
+                    Ok(serde_json::json!({ "status": "unavailable", "error": e.to_string() }))
+                }
+            }
+        }
+        "unregister" | "disconnect" => {
+            if accelerator.is_empty() {
+                return Ok(serde_json::json!({ "status": "ignored" }));
+            }
+            let shortcut: Shortcut = accelerator
+                .parse()
+                .map_err(|e| format!("'{}' is not a shortcut: {}", accelerator, e))?;
 
-            Ok(serde_json::json!({ "status": "registered" }))
+            let _ = app.global_shortcut().unregister(shortcut);
+            app.state::<RegisteredShortcuts>()
+                .0
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .remove(&shortcut.id());
+            Ok(serde_json::json!({ "status": "unregistered" }))
         }
         _ => Ok(serde_json::json!({ "status": "unknown_event" })),
     }
@@ -415,5 +614,62 @@ mod tests {
         assert_eq!(payload["paths"][0], "/tmp/report.csv");
         assert_eq!(payload["position"]["x"], 10.0);
         assert_eq!(payload["position"]["y"], 20.0);
+    }
+}
+
+#[cfg(test)]
+mod native_component_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn a_message_with_something_to_say_asks_for_a_notification() {
+        assert!(asks_for_a_notification("show", &json!({ "title": "Task done" })));
+        assert!(asks_for_a_notification("connect", &json!({ "title": "Task done", "body": "Well done" })));
+        assert!(asks_for_a_notification("show", &json!({ "body": "Only a body" })));
+    }
+
+    // A bridge component says goodbye when its element leaves the page. That
+    // is not something to tell the person about.
+    #[test]
+    fn a_component_going_away_is_not_a_notification() {
+        assert!(!asks_for_a_notification("disconnect", &json!({})));
+        assert!(!asks_for_a_notification("disconnect", &json!({ "title": "Task done" })));
+    }
+
+    #[test]
+    fn a_message_with_nothing_to_say_is_not_a_notification() {
+        assert!(!asks_for_a_notification("connect", &json!({})));
+        assert!(!asks_for_a_notification("show", &json!({ "title": "", "body": "  " })));
+    }
+
+    #[test]
+    fn the_badge_shows_a_count_and_clears_at_zero() {
+        assert_eq!(badge_count(&json!({ "count": 3 })), Some(3));
+        assert_eq!(badge_count(&json!({ "count": 0 })), None);
+        assert_eq!(badge_count(&json!({})), None);
+        assert_eq!(badge_count(&json!({ "count": -2 })), None);
+        assert_eq!(badge_count(&json!({ "count": "7" })), None);
+    }
+
+    #[test]
+    fn a_menu_item_is_known_by_its_id_or_failing_that_its_title() {
+        assert_eq!(
+            menu_item_id(&json!({ "id": "export", "title": "Export PDF" })).as_deref(),
+            Some("bridge-item:export")
+        );
+        assert_eq!(
+            menu_item_id(&json!({ "title": "Export PDF" })).as_deref(),
+            Some("bridge-item:Export PDF")
+        );
+        assert_eq!(menu_item_id(&json!({})), None);
+        assert_eq!(menu_item_id(&json!({ "title": "" })), None);
+    }
+
+    #[test]
+    fn a_click_is_traced_back_to_the_item_the_page_registered() {
+        assert_eq!(bridge_item_for_menu_event("bridge-item:export"), Some("export"));
+        assert_eq!(bridge_item_for_menu_event("quit"), None);
+        assert_eq!(bridge_item_for_menu_event("bridge-item:"), None);
     }
 }
