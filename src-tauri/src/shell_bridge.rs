@@ -81,7 +81,8 @@ async fn handle_spawn(
     let stderr = child.stderr.take();
 
     // Create kill channel
-    let (kill_tx, kill_rx) = tokio::sync::oneshot::channel::<()>();
+    let (kill_tx, kill_rx) =
+        tokio::sync::oneshot::channel::<crate::process_manager::StopRequest>();
 
     // Register in process manager. If we are at the concurrency ceiling the child
     // has already started, so stop it rather than leaving it untracked.
@@ -111,7 +112,7 @@ async fn stream_process(
     mut child: tokio::process::Child,
     stdout: Option<tokio::process::ChildStdout>,
     stderr: Option<tokio::process::ChildStderr>,
-    kill_rx: tokio::sync::oneshot::Receiver<()>,
+    kill_rx: tokio::sync::oneshot::Receiver<crate::process_manager::StopRequest>,
 ) {
     let mut stdout_lines = stdout.map(|s| BufReader::new(s).lines());
     let mut stderr_lines = stderr.map(|s| BufReader::new(s).lines());
@@ -149,11 +150,15 @@ async fn stream_process(
                     Err(_) => { stderr_done = true; }
                 }
             }
-            _ = &mut kill_rx => {
+            request = &mut kill_rx => {
                 let _ = child.kill().await;
+                let _ = child.wait().await;
                 emit_shell_event(&app, &id, "exit", serde_json::json!({ "id": id, "code": null }));
                 let pm = app.state::<ProcessManager>();
                 pm.mark_exited(&id, None).await;
+                if let Ok(request) = request {
+                    request.stopped();
+                }
                 return;
             }
         }

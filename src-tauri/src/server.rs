@@ -93,7 +93,8 @@ pub async fn start(
     let stderr = child.stderr.take();
 
     // Registered so quitting the app stops the server it started.
-    let (kill_tx, kill_rx) = tokio::sync::oneshot::channel::<()>();
+    let (kill_tx, kill_rx) =
+        tokio::sync::oneshot::channel::<crate::process_manager::StopRequest>();
     app.state::<crate::process_manager::ProcessManager>()
         .register(
             SERVER_PROCESS_ID.to_string(),
@@ -119,9 +120,13 @@ pub async fn start(
                 line = async { match err.as_mut() { Some(l) => l.next_line().await, None => std::future::pending().await } } => {
                     match line { Ok(Some(l)) => log::warn!("[server] {}", l), _ => err = None }
                 }
-                _ = &mut kill_rx => {
+                request = &mut kill_rx => {
                     log::info!("Stopping the app server");
                     let _ = child.kill().await;
+                    let _ = child.wait().await;
+                    if let Ok(request) = request {
+                        request.stopped();
+                    }
                     return;
                 }
                 status = child.wait() => {
