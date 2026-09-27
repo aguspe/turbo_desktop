@@ -44,6 +44,9 @@ changed in the shell:
   the inspector is asked for by the gem's version.
 - Notifications appear under `tauri dev` on macOS.
 - A file dialog can be given a default name and the kinds of file to offer.
+- A deep link that starts the app is followed. It was handed to a window
+  with no page in it yet, and lost. A file that starts the app while the
+  server is still starting is kept for the app in the same way.
 - Two bridge controllers on one page keep their own component names.
 - In development, the error page opens in the app rather than in the browser.
 - The offline banner goes away when the next request succeeds.

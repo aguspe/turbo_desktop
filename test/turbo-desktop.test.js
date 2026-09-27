@@ -982,7 +982,8 @@ describe("stimulusBridge with more than one component", () => {
     assertDeepEqual(
       calls
         .filter((call) => call.cmd === "handle_bridge_message")
-        .map((call) => call.args.message.component),
+        .map((call) => call.args.message.component)
+        .filter((component) => ["notification", "menu-item"].includes(component)),
       ["notification", "menu-item"]
     );
   });
@@ -1342,8 +1343,9 @@ describe("TurboDesktop.toggleDevTools", () => {
 
     const asked = calls
       .filter((call) => call.cmd === "handle_bridge_message")
-      .map((call) => call.args.message);
-    assertDeepEqual(asked.at(-1), { component: "devtools", event: "toggle", data: {} });
+      .map((call) => call.args.message)
+      .filter((message) => message.component === "devtools");
+    assertDeepEqual(asked, [{ component: "devtools", event: "toggle", data: {} }]);
   });
 });
 
@@ -1482,5 +1484,112 @@ describe("a modal that moves on to an ordinary page", () => {
     });
 
     assertDeepEqual(visits, [{ url: "https://myapp.test/tasks", action: "replace" }]);
+  });
+});
+
+describe("a link that started the app", () => {
+  // The link arrives before the page does. The shell keeps it, and the page
+  // asks for it once it is there.
+  function appPage({ pending, url = "http://localhost:3000/" }) {
+    const dom = new JSDOM(`<!DOCTYPE html><html><head><title>Home</title></head><body></body></html>`, {
+      url,
+      runScripts: "dangerously",
+    });
+    const { window } = dom;
+    const calls = [];
+    const visits = [];
+    let kept = pending;
+
+    window.__TURBO_DESKTOP_SERVER_URL__ = "http://localhost:3000";
+    window.__TAURI_INTERNALS__ = {
+      invoke: async (cmd, args) => {
+        calls.push({ cmd, args });
+        if (cmd !== "handle_bridge_message") return undefined;
+        if (args.message.component === "deep-link" && args.message.event === "pending") {
+          const url = kept;
+          kept = null;
+          return { status: "ok", url };
+        }
+        return { status: "ok", paths: [] };
+      },
+    };
+    window.Turbo = { visit: (to, options) => visits.push({ url: to, ...options }) };
+    window.eval(scriptSource);
+
+    return { window, calls, visits, keep: (link) => (kept = link) };
+  }
+
+  it("is followed once the page is there", async () => {
+    const { visits } = appPage({ pending: "http://localhost:3000/orders/123?ref=email" });
+    await tick();
+    await tick();
+
+    assertDeepEqual(visits, [{ url: "http://localhost:3000/orders/123?ref=email" }]);
+  });
+
+  it("is nothing to follow when the app was opened the ordinary way", async () => {
+    const { visits } = appPage({ pending: null });
+    await tick();
+    await tick();
+
+    assertDeepEqual(visits, []);
+  });
+
+  it("is followed when it arrives with the app already open", async () => {
+    const { window, visits, keep } = appPage({ pending: null });
+    await tick();
+
+    keep("http://localhost:3000/tasks");
+    window.TurboDesktop.__receive("deep-link-pending", {});
+    await tick();
+
+    assertDeepEqual(visits, [{ url: "http://localhost:3000/tasks" }]);
+  });
+
+  it("is left for the app, by a page that is not the app", async () => {
+    // The waiting page, shown while the server starts. Following the link
+    // from here would be asking a server that is not up yet.
+    const { visits, calls } = appPage({
+      pending: "http://localhost:3000/orders/123",
+      url: "http://127.0.0.1:1430/error.html?error=network_failure",
+    });
+    await tick();
+    await tick();
+
+    assertDeepEqual(visits, []);
+    assert.equal(
+      calls.filter(
+        (call) => call.cmd === "handle_bridge_message" && call.args.message.component === "deep-link"
+      ).length,
+      0,
+      "the waiting page took the link, and the app will never see it"
+    );
+  });
+});
+
+describe("a file that started the app", () => {
+  it("is left for the app, by the page shown while the server starts", async () => {
+    const dom = new JSDOM(`<!DOCTYPE html><html><head></head><body></body></html>`, {
+      url: "http://127.0.0.1:1430/error.html?error=network_failure",
+      runScripts: "dangerously",
+    });
+    const { window } = dom;
+    const asked = [];
+    window.__TURBO_DESKTOP_SERVER_URL__ = "http://localhost:3000";
+    window.__TAURI_INTERNALS__ = {
+      invoke: async (cmd, args) => {
+        if (cmd === "handle_bridge_message") asked.push(args.message.component);
+        return { status: "ok", paths: ["/tmp/tasks.csv"] };
+      },
+    };
+
+    window.eval(scriptSource);
+    await tick();
+
+    assert.equal(
+      asked.includes("file-open"),
+      false,
+      "the waiting page took the file, and the app will never see it"
+    );
   });
 });

@@ -49,6 +49,32 @@ pub fn resolve(server_url: &str, link: &url::Url) -> Result<url::Url, String> {
     }
 }
 
+/// The link the app was last asked to open, waiting for the page to collect it.
+///
+/// A link that starts the app arrives before there is a page to give it to,
+/// and one that arrives while the server is starting finds the waiting page.
+/// It is kept here instead: the shell pings the page, and the page asks for
+/// the link once it is the app's own page, on its own startup if the ping
+/// came too early.
+#[derive(Default)]
+pub struct PendingLink(std::sync::Mutex<Option<String>>);
+
+impl PendingLink {
+    /// Keep a link for the page. A later one replaces it: it is where the
+    /// person asked to go last.
+    pub fn keep(&self, target: &str) {
+        *self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(target.to_string());
+    }
+
+    /// Hand the link over, once.
+    pub fn take(&self) -> Option<String> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+    }
+}
+
 /// Handle deep links as they arrive.
 pub fn handle(app: &tauri::AppHandle, urls: Vec<url::Url>) {
     let config = app.state::<crate::window::TurboDesktopConfig>();
@@ -64,21 +90,17 @@ pub fn handle(app: &tauri::AppHandle, urls: Vec<url::Url>) {
             }
         };
 
-        let Some(window) = app.get_webview_window("main") else {
-            continue;
-        };
+        app.state::<PendingLink>().keep(target.as_str());
 
-        // Ask the page to visit, so Turbo handles it as a normal navigation and
-        // the path configuration still decides how it is presented. Falling back
-        // to navigating the window covers a page that has not loaded yet.
-        crate::window::deliver_to_page(
-            &window,
-            "visit",
-            &serde_json::json!({ "url": target.as_str() }),
-        );
-
-        let _ = window.show();
-        let _ = window.set_focus();
+        // Ping a loaded page so it collects the link now, and visits through
+        // Turbo, so the path configuration still decides how it is presented.
+        // A page that is not there yet misses the ping and asks on its own
+        // startup instead.
+        if let Some(window) = app.get_webview_window("main") {
+            crate::window::deliver_to_page(&window, "deep-link-pending", &serde_json::json!({}));
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
     }
 }
 
@@ -152,6 +174,37 @@ pub fn paths_from_args<I: Iterator<Item = String>>(args: I) -> Vec<std::path::Pa
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // A link that starts the app arrives before there is a page to give it
+    // to. It was handed to the empty window and lost.
+    #[test]
+    fn a_link_is_kept_until_the_page_collects_it() {
+        let pending = PendingLink::default();
+
+        pending.keep("http://localhost:3000/orders/123");
+
+        assert_eq!(pending.take().as_deref(), Some("http://localhost:3000/orders/123"));
+    }
+
+    #[test]
+    fn a_link_is_collected_once() {
+        let pending = PendingLink::default();
+        pending.keep("http://localhost:3000/orders/123");
+
+        pending.take();
+
+        assert_eq!(pending.take(), None);
+    }
+
+    #[test]
+    fn the_last_link_is_the_one_that_is_followed() {
+        let pending = PendingLink::default();
+
+        pending.keep("http://localhost:3000/orders/1");
+        pending.keep("http://localhost:3000/orders/2");
+
+        assert_eq!(pending.take().as_deref(), Some("http://localhost:3000/orders/2"));
+    }
 
     fn link(s: &str) -> url::Url {
         url::Url::parse(s).expect("test link should parse")

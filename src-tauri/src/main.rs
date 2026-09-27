@@ -89,6 +89,7 @@ fn main() {
         .manage(window::FocusTracker::default())
         .manage(security::UserGrants::default())
         .manage(deep_link::PendingOpenedFiles::default())
+        .manage(deep_link::PendingLink::default())
         // Files dragged from the Finder/Explorer onto any window reach the web
         // layer as bridge events, with their paths granted for the session.
         .on_window_event(|window, event| {
@@ -286,6 +287,12 @@ fn main() {
             app.deep_link().on_open_url(move |event| {
                 deep_link::handle(&deep_link_app, event.urls());
             });
+
+            // The link that started the app, if one did. It arrived before
+            // anything was listening.
+            if let Ok(Some(urls)) = app.deep_link().get_current() {
+                deep_link::handle(&app_handle, urls);
+            }
 
             // Files from outside the app: a double-click on an associated
             // type. Windows and Linux pass them as launch arguments; macOS

@@ -292,6 +292,7 @@ The Bridge is the desktop equivalent of **Strada**. It lets your web components 
 | `clipboard` | Read and write the system clipboard, no gesture needed |
 | `autostart` | Launch at login, behind a toggle the user can see |
 | `file-open` | Files opened with the app, even from a cold launch |
+| `deep-link` | The link the app was asked to open, kept until the page is there |
 | `updater` | Check for and install app updates |
 | `devtools` | Open the webview's developer tools (development builds) |
 
@@ -405,6 +406,9 @@ macOS Launch Services decides — so if every app built on this shell shared one
 scheme, installing two of them would send one app's links to the other. Pick
 something distinctive: nothing stops unrelated software registering the same
 string.
+
+A link that starts the app is kept until the app's page has loaded, and
+followed then. Nothing has to be written for it.
 
 Links are resolved against `server_url` and refused if they point anywhere else.
 A deep link arrives from outside the app, so it is not trusted to say where to

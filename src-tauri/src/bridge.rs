@@ -66,6 +66,17 @@ pub async fn handle_bridge_message(
         "autostart" => handle_autostart(&app, &message).await,
         // The page drains files the OS asked the app to open. Pull rather than
         // push: a launch-by-double-click happens before any page exists.
+        // The page collecting the link the app was asked to open.
+        "deep-link" => match message.event.as_str() {
+            "pending" => {
+                use tauri::Manager;
+                Ok(serde_json::json!({
+                    "status": "ok",
+                    "url": app.state::<crate::deep_link::PendingLink>().take(),
+                }))
+            }
+            _ => Ok(serde_json::json!({ "status": "unknown_event" })),
+        },
         "file-open" => match message.event.as_str() {
             "pending" => Ok(serde_json::json!({
                 "status": "ok",

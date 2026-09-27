@@ -893,6 +893,9 @@
       case "visit":
         performVisit(detail.url);
         break;
+      case "deep-link-pending":
+        followTheLink();
+        break;
       case "file-open-pending":
         drainOpenedFiles();
         break;
@@ -912,7 +915,23 @@
    * shell before any page exists, so the page asks — on its own startup, and
    * again whenever the shell pings a running page.
    */
+  // Whether this is a page of the app, rather than the one the shell shows
+  // while the server starts. What is collected from the shell is handed over
+  // once, so it is for the app's page to collect.
+  function onTheAppsOwnPage() {
+    const server = window.__TURBO_DESKTOP_SERVER_URL__;
+    if (!server) return true;
+
+    try {
+      return new URL(server).origin === window.location.origin;
+    } catch (_e) {
+      return true;
+    }
+  }
+
   async function drainOpenedFiles() {
+    if (!onTheAppsOwnPage()) return;
+
     try {
       const result = await TurboDesktop.sendBridgeMessage(
         "file-open",
@@ -931,6 +950,21 @@
   }
 
   drainOpenedFiles();
+
+  // ─── A link from outside ───────────────────────────────────────────────────
+  //
+  // The shell keeps the link the app was asked to open, and this collects it.
+  // Asked for on startup too, because a link that started the app arrived
+  // before there was a page to tell.
+
+  async function followTheLink() {
+    if (!onTheAppsOwnPage()) return;
+
+    const pending = await TurboDesktop.sendBridgeMessage("deep-link", "pending", {});
+    if (pending && pending.url) performVisit(pending.url);
+  }
+
+  whenTheDocumentIsReady(followTheLink);
 
   /**
    * True when someone is part-way through entering something.
