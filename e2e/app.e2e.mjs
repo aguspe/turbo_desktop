@@ -632,10 +632,30 @@ test("sudo is off unless the app turns it on", async () => {
 test("the Dev Inspector loads and opens with its shortcut", async () => {
   await startOver();
 
-  await waitFor(
-    () => browser.execute(() => Boolean(document.querySelector("[data-turbo-desktop-inspector]"))),
-    { label: "the inspector to mount" }
-  );
+  try {
+    await waitFor(
+      () => browser.execute(() => Boolean(document.querySelector("[data-turbo-desktop-inspector]"))),
+      { label: "the inspector to mount", tries: 20 }
+    );
+  } catch (error) {
+    // Why not, in the page's own words.
+    const why = await browser.executeAsync((done) => {
+      const td = window.TurboDesktop;
+      const report = [`wanted=${td._inspectorWanted}`, `ready=${td.ready}`];
+      const timer = setTimeout(() => done([...report, "import: still pending after 5s"]), 5000);
+      import("/turbo-desktop/inspector.js").then(
+        (m) => {
+          clearTimeout(timer);
+          done([...report, `import: ok, exports ${Object.keys(m)}`]);
+        },
+        (e) => {
+          clearTimeout(timer);
+          done([...report, `import: failed, ${e && e.message}`]);
+        }
+      );
+    });
+    throw new Error(`${error.message} — ${why.join("; ")}`);
+  }
   const hidden = await browser.execute(
     () => document.querySelector("[data-turbo-desktop-inspector]").style.display
   );
