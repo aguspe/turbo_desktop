@@ -852,5 +852,8 @@ pub async fn get_window_info(
         "isMaximized": is_maximized,
         "platform": std::env::consts::OS,
         "arch": std::env::consts::ARCH,
+        // False in an app built for release, which reads its configuration
+        // from inside its own bundle and nowhere else.
+        "development": cfg!(debug_assertions),
     }))
 }

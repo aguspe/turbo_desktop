@@ -24,6 +24,8 @@ export interface WindowInfo {
   isMaximized: boolean;
   platform: string;
   arch: string;
+  /** True in a development build; false in an app built for release. */
+  development: boolean;
 }
 
 /** A bridge message passed between web and native. */

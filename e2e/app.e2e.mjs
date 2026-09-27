@@ -419,6 +419,7 @@ test("the window title follows the page", async () => {
     { label: "the main window's details" }
   );
   assert.equal(info.label, "main");
+  assert.equal(info.development, true, "the tests run a debug build");
 });
 
 // ─── Links ───────────────────────────────────────────────────────────────────
