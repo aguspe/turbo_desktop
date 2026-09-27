@@ -182,7 +182,7 @@ mod tests {
 
     #[test]
     fn the_rails_app_is_a_level_above_the_config_by_default() {
-        let dir = std::env::temp_dir().join("turbo-desktop-server-default");
+        let dir = crate::test_temp_dir().join("turbo-desktop-server-default");
         let desktop = dir.join("desktop");
         std::fs::create_dir_all(&desktop).unwrap();
 
@@ -194,7 +194,7 @@ mod tests {
 
     #[test]
     fn an_explicit_directory_wins() {
-        let dir = std::env::temp_dir().join("turbo-desktop-server-explicit");
+        let dir = crate::test_temp_dir().join("turbo-desktop-server-explicit");
         let api = dir.join("api");
         std::fs::create_dir_all(&api).unwrap();
 
@@ -212,7 +212,7 @@ mod tests {
 
     #[test]
     fn a_missing_directory_is_left_for_the_spawn_to_report() {
-        let dir = std::env::temp_dir().join("turbo-desktop-server-missing");
+        let dir = crate::test_temp_dir().join("turbo-desktop-server-missing");
         let config = ServerConfig {
             command: Some("bin/rails server".into()),
             directory: Some("nope".into()),

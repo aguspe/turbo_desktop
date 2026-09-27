@@ -526,7 +526,7 @@ mod tests {
 
     #[test]
     fn resolves_paths_inside_an_allowed_root() {
-        let dir = std::env::temp_dir().join("turbo-desktop-scope-ok");
+        let dir = crate::test_temp_dir().join("turbo-desktop-scope-ok");
         std::fs::create_dir_all(&dir).unwrap();
         let root = dir.canonicalize().unwrap();
 
@@ -539,7 +539,7 @@ mod tests {
 
     #[test]
     fn rejects_traversal_out_of_the_root() {
-        let dir = std::env::temp_dir().join("turbo-desktop-scope-traversal");
+        let dir = crate::test_temp_dir().join("turbo-desktop-scope-traversal");
         std::fs::create_dir_all(&dir).unwrap();
         let root = dir.canonicalize().unwrap();
 
@@ -553,7 +553,7 @@ mod tests {
 
     #[test]
     fn rejects_protected_locations_inside_a_root() {
-        let dir = std::env::temp_dir().join("turbo-desktop-scope-denied");
+        let dir = crate::test_temp_dir().join("turbo-desktop-scope-denied");
         std::fs::create_dir_all(&dir).unwrap();
         let root = dir.canonicalize().unwrap();
 
@@ -582,7 +582,7 @@ mod tests {
 
     #[test]
     fn a_dialog_picked_file_is_reachable_outside_the_roots() {
-        let dir = std::env::temp_dir().join("turbo-desktop-grant-file");
+        let dir = crate::test_temp_dir().join("turbo-desktop-grant-file");
         std::fs::create_dir_all(&dir).unwrap();
         let picked = dir.canonicalize().unwrap().join("report.csv");
 
@@ -606,7 +606,7 @@ mod tests {
 
     #[test]
     fn a_dialog_picked_folder_covers_its_subtree() {
-        let dir = std::env::temp_dir().join("turbo-desktop-grant-folder");
+        let dir = crate::test_temp_dir().join("turbo-desktop-grant-folder");
         std::fs::create_dir_all(&dir).unwrap();
         let folder = dir.canonicalize().unwrap();
 
@@ -623,7 +623,7 @@ mod tests {
 
     #[test]
     fn a_grant_does_not_override_protected_locations() {
-        let dir = std::env::temp_dir().join("turbo-desktop-grant-denied");
+        let dir = crate::test_temp_dir().join("turbo-desktop-grant-denied");
         std::fs::create_dir_all(&dir).unwrap();
         let folder = dir.canonicalize().unwrap();
 
@@ -641,7 +641,7 @@ mod tests {
         // A granted path must match after normalization, so `root/../granted`
         // resolves to the grant itself and is allowed, while unrelated
         // traversal keeps failing.
-        let dir = std::env::temp_dir().join("turbo-desktop-grant-traversal");
+        let dir = crate::test_temp_dir().join("turbo-desktop-grant-traversal");
         std::fs::create_dir_all(&dir).unwrap();
         let picked = dir.canonicalize().unwrap().join("picked.txt");
 

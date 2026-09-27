@@ -17,6 +17,18 @@ mod tray;
 mod updater_bridge;
 mod window;
 
+/// A temporary directory belonging to this test run alone.
+///
+/// The tests used to share fixed names under the system's temporary directory,
+/// so two runs at once — two checkouts, or two apps scaffolded from this shell —
+/// created, wrote and removed each other's files and failed at random.
+#[cfg(test)]
+pub(crate) fn test_temp_dir() -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("turbo-desktop-tests-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("create this test run's temporary directory");
+    dir
+}
+
 use config::PathConfigurationStore;
 use connection::{ConnectionMonitor, Transition, VisitError};
 use std::sync::Arc;

@@ -435,7 +435,7 @@ mod tests {
     use super::*;
 
     fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("turbo-desktop-config-{name}"));
+        let dir = crate::test_temp_dir().join(format!("turbo-desktop-config-{name}"));
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
         dir

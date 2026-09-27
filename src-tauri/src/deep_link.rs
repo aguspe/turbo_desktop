@@ -159,7 +159,7 @@ mod tests {
 
     #[test]
     fn only_existing_non_flag_arguments_are_opened_files() {
-        let file = std::env::temp_dir().join("turbo-desktop-assoc.txt");
+        let file = crate::test_temp_dir().join("turbo-desktop-assoc.txt");
         std::fs::write(&file, "x").unwrap();
 
         let args = vec![
