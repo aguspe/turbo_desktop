@@ -29,6 +29,10 @@ changes. What changed in the shell:
   after the page had loaded, so a Stimulus controller that used it in
   `connect()` found nothing on the first page of every window.
   `turbo-desktop:ready` is dispatched once the document has loaded.
+- An element that declares a component with `turbo_desktop_bridge` gets it.
+  The helper wrote the attributes and nothing read them.
+- `TurboDesktop.toggleDevTools()` and View → Developer Tools open the
+  developer tools. They logged a line and did nothing.
 - Two bridge controllers on one page keep their own component names.
 - In development, the error page opens in the app rather than in the browser.
 - The offline banner goes away when the next request succeeds.

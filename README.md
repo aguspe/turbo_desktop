@@ -293,6 +293,7 @@ The Bridge is the desktop equivalent of **Strada**. It lets your web components 
 | `autostart` | Launch at login, behind a toggle the user can see |
 | `file-open` | Files opened with the app, even from a cold launch |
 | `updater` | Check for and install app updates |
+| `devtools` | Open the webview's developer tools (development builds) |
 
 A component that cannot do its job on the machine it is running on (no
 notification service, a shortcut another application holds) answers with
@@ -702,14 +703,32 @@ Rename it with `config.variant`, or set it to `nil` to leave variants alone.
 
 ### Rails View Helpers
 
+An element can declare a component in its markup, and gets it without a
+Stimulus controller of its own:
+
 ```erb
-<%# Attach bridge data attributes to any element %>
+<%# A menu item, with a shortcut. Choosing it presses the button. %>
 <%= tag.button "Export PDF",
-    **turbo_desktop_bridge("menu-item",
-      title: "Export PDF",
-      shortcut: "Cmd+E"
-    ) %>
+    **turbo_desktop_bridge("menu-item", title: "Export PDF", shortcut: "CmdOrCtrl+E") %>
+
+<%# A shortcut that works with the app in the background. %>
+<%= tag.button "Quick add",
+    **turbo_desktop_bridge("shortcut", id: "quick-add", accelerator: "CmdOrCtrl+Shift+K") %>
+
+<%# A notification when the button is pressed. %>
+<%= tag.button "Complete",
+    **turbo_desktop_bridge("notification", title: "Task completed", body: task.title) %>
+
+<%# The badge on the dock icon, set to what the page shows. %>
+<%= tag.span pending.count, **turbo_desktop_bridge("badge", count: pending.count) %>
 ```
+
+The helper returns whole attribute names, so splat it among the element's
+attributes as above, not inside `data: { }`, which would prefix them a second
+time.
+
+A menu item or shortcut belongs to the page that declared it, and is taken
+away when Turbo moves on to a page that does not.
 
 ## Rails Gem
 

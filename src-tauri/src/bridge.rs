@@ -62,6 +62,7 @@ pub async fn handle_bridge_message(
         "filesystem" => crate::fs_bridge::handle_filesystem(&app, &message).await,
         "sudo" => crate::sudo_bridge::handle_sudo(&app, &message).await,
         "clipboard" => handle_clipboard(&app, &message).await,
+        "devtools" => handle_devtools(&app, &message),
         "autostart" => handle_autostart(&app, &message).await,
         // The page drains files the OS asked the app to open. Pull rather than
         // push: a launch-by-double-click happens before any page exists.
@@ -109,6 +110,42 @@ pub fn broadcast_response(app: &tauri::AppHandle, response: &BridgeResponse) {
 }
 
 // ─── Built-in Bridge Component Handlers ─────────────────────────────────────
+
+/// Open the developer tools in the main window, or close them if open.
+///
+/// A development build has them. An app built for release does not, and says
+/// so rather than pretending.
+fn handle_devtools(
+    app: &tauri::AppHandle,
+    message: &BridgeMessage,
+) -> Result<serde_json::Value, String> {
+    if message.event != "toggle" {
+        return Ok(serde_json::json!({ "status": "unknown_event" }));
+    }
+
+    #[cfg(debug_assertions)]
+    {
+        use tauri::Manager;
+
+        let window = app
+            .get_webview_window("main")
+            .ok_or_else(|| "There is no main window".to_string())?;
+
+        if window.is_devtools_open() {
+            window.close_devtools();
+            Ok(serde_json::json!({ "status": "closed" }))
+        } else {
+            window.open_devtools();
+            Ok(serde_json::json!({ "status": "opened" }))
+        }
+    }
+
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = app;
+        Ok(serde_json::json!({ "status": "unavailable", "error": "Developer tools are in development builds only" }))
+    }
+}
 
 /// Whether a message to the notification component asks for one to be shown.
 ///

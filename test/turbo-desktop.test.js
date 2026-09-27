@@ -1197,3 +1197,152 @@ describe("being there before the page's own scripts", () => {
     assert.equal(titles.at(-1).args.title, "Tasks");
   });
 });
+
+describe("elements that declare a bridge component", () => {
+  // What `turbo_desktop_bridge("menu-item", title: "Export PDF", shortcut: "Cmd+E")`
+  // writes. The attributes were written and never read.
+  function page(html) {
+    const env = createEnvironment({ invoke: () => ({ status: "ok" }) });
+    env.window.document.body.innerHTML = html;
+    env.window.document.dispatchEvent(new env.window.Event("turbo:load"));
+    return env;
+  }
+
+  function messages(calls, component) {
+    return calls
+      .filter((call) => call.cmd === "handle_bridge_message")
+      .map((call) => call.args.message)
+      .filter((message) => message.component === component);
+  }
+
+  function receive(window, component, event, data) {
+    window.TurboDesktop.__receive("bridge-response", { component, event, data });
+  }
+
+  it("puts a menu item in the menu bar", async () => {
+    const { calls } = page(`
+      <button id="export"
+              data-turbo-desktop-bridge="menu-item"
+              data-turbo-desktop-bridge-title="Export PDF"
+              data-turbo-desktop-bridge-shortcut="CmdOrCtrl+E">Export PDF</button>`);
+    await tick();
+
+    assertDeepEqual(messages(calls, "menu-item"), [
+      {
+        component: "menu-item",
+        event: "connect",
+        data: { id: "Export PDF", title: "Export PDF", shortcut: "CmdOrCtrl+E" },
+      },
+    ]);
+  });
+
+  it("presses the element when its menu item is chosen", async () => {
+    const { window } = page(`
+      <button id="export" data-turbo-desktop-bridge="menu-item"
+              data-turbo-desktop-bridge-title="Export PDF">Export PDF</button>`);
+    let clicks = 0;
+    window.document.getElementById("export").addEventListener("click", () => clicks++);
+    await tick();
+
+    receive(window, "menu-item", "clicked", { id: "Export PDF" });
+
+    assert.equal(clicks, 1);
+  });
+
+  it("presses the element when its shortcut is pressed", async () => {
+    const { window, calls } = page(`
+      <button id="add" data-turbo-desktop-bridge="shortcut"
+              data-turbo-desktop-bridge-id="quick-add"
+              data-turbo-desktop-bridge-accelerator="CmdOrCtrl+Shift+K">Add</button>`);
+    let clicks = 0;
+    window.document.getElementById("add").addEventListener("click", () => clicks++);
+    await tick();
+
+    assertDeepEqual(messages(calls, "shortcut")[0].data, {
+      id: "quick-add",
+      accelerator: "CmdOrCtrl+Shift+K",
+    });
+    receive(window, "shortcut", "triggered", { id: "quick-add", accelerator: "CmdOrCtrl+Shift+K" });
+
+    assert.equal(clicks, 1);
+  });
+
+  it("shows a notification when the element is pressed", async () => {
+    const { window, calls } = page(`
+      <button id="done" data-turbo-desktop-bridge="notification"
+              data-turbo-desktop-bridge-title="Task done"
+              data-turbo-desktop-bridge-body="Well done">Complete</button>`);
+    await tick();
+    assert.equal(messages(calls, "notification").length, 0, "shown before anyone pressed anything");
+
+    window.document.getElementById("done").click();
+    await tick();
+
+    assertDeepEqual(messages(calls, "notification"), [
+      { component: "notification", event: "show", data: { title: "Task done", body: "Well done" } },
+    ]);
+  });
+
+  it("sets the badge to the count on the page", async () => {
+    const { calls } = page(`<span data-turbo-desktop-bridge="badge" data-turbo-desktop-bridge-count="4">4</span>`);
+    await tick();
+
+    assertDeepEqual(messages(calls, "badge")[0].data, { count: 4 });
+  });
+
+  it("binds an element once, however often the page is rendered", async () => {
+    const { window, calls } = page(`
+      <button data-turbo-desktop-bridge="menu-item" data-turbo-desktop-bridge-title="Export PDF">x</button>`);
+    await tick();
+
+    window.document.dispatchEvent(new window.Event("turbo:render"));
+    window.document.dispatchEvent(new window.Event("turbo:load"));
+    await tick();
+
+    assert.equal(messages(calls, "menu-item").length, 1);
+  });
+
+  it("takes the menu item away when the page that declared it has gone", async () => {
+    const { window, calls } = page(`
+      <button data-turbo-desktop-bridge="menu-item" data-turbo-desktop-bridge-title="Export PDF">x</button>`);
+    await tick();
+
+    window.document.body.innerHTML = "<p>Another page</p>";
+    window.document.dispatchEvent(new window.Event("turbo:load"));
+    await tick();
+
+    assertDeepEqual(messages(calls, "menu-item").at(-1), {
+      component: "menu-item",
+      event: "unregister",
+      data: { id: "Export PDF" },
+    });
+  });
+
+  it("does not press an element that is no longer on the page", async () => {
+    const { window } = page(`
+      <button id="export" data-turbo-desktop-bridge="menu-item"
+              data-turbo-desktop-bridge-title="Export PDF">x</button>`);
+    const button = window.document.getElementById("export");
+    let clicks = 0;
+    button.addEventListener("click", () => clicks++);
+    await tick();
+
+    button.remove();
+    receive(window, "menu-item", "clicked", { id: "Export PDF" });
+
+    assert.equal(clicks, 0);
+  });
+});
+
+describe("TurboDesktop.toggleDevTools", () => {
+  it("asks the shell to open the developer tools", async () => {
+    const { window, calls } = createEnvironment({ invoke: () => ({ status: "opened" }) });
+
+    await window.TurboDesktop.toggleDevTools();
+
+    const asked = calls
+      .filter((call) => call.cmd === "handle_bridge_message")
+      .map((call) => call.args.message);
+    assertDeepEqual(asked.at(-1), { component: "devtools", event: "toggle", data: {} });
+  });
+});

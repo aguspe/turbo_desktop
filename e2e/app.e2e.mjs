@@ -550,6 +550,24 @@ test("a menu item can be taken away", async () => {
   assert.deepEqual(items, []);
 });
 
+test("an element that declares a menu item gets one, for as long as its page is shown", async () => {
+  await startOver();
+  await click("to-declared");
+  await waitFor(async () => (await path()) === "/declared", { label: "the page that declares it" });
+
+  await waitFor(
+    async () => (await bridge("menu-item", "list")).items.some((item) => item.id === "Export PDF"),
+    { label: "the declared item to reach the menu bar" }
+  );
+
+  await click("to-tasks");
+  await waitFor(async () => (await path()) === "/tasks", { label: "the tasks page" });
+
+  await waitFor(async () => (await bridge("menu-item", "list")).items.length === 0, {
+    label: "the item to leave with its page",
+  });
+});
+
 test("a global shortcut is registered, or the page is told it cannot be", async () => {
   const response = await bridge("shortcut", "register", {
     id: "quick-add",

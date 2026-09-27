@@ -190,10 +190,13 @@
     /**
      * Toggle developer tools (dispatches to Rust which can open the inspector).
      */
-    toggleDevTools() {
-      // Tauri 2 doesn't expose devtools toggle from JS directly,
-      // but we can emit a custom event for the Rust side to handle
-      console.log("[turbo-desktop] DevTools toggle requested");
+    /**
+     * Open the webview's developer tools, or close them if they are open.
+     * Development builds only: resolves with `{ status: "unavailable" }` in
+     * an app built for release.
+     */
+    async toggleDevTools() {
+      return TurboDesktop.sendBridgeMessage("devtools", "toggle", {});
     },
 
     // ─── Shell Execution API ─────────────────────────────────────────────────
@@ -661,6 +664,112 @@
     };
   };
 
+  // ─── Components declared in the markup ─────────────────────────────────────
+  //
+  // What the Rails helper writes:
+  //
+  //   <%= tag.button "Export PDF",
+  //         **turbo_desktop_bridge("menu-item", title: "Export PDF", shortcut: "CmdOrCtrl+E") %>
+  //
+  // An element that declares a component gets it without a controller of its
+  // own. Choosing the menu item, or pressing the shortcut, presses the element.
+
+  const BRIDGE_ATTRIBUTE = "data-turbo-desktop-bridge";
+  const BRIDGE_OPTION = "turboDesktopBridge";
+  const boundElements = new WeakSet();
+  // What is registered with the shell, and the element that asked for it.
+  const declared = { "menu-item": new Map(), shortcut: new Map() };
+
+  function optionsOf(element) {
+    const options = {};
+    for (const [key, value] of Object.entries(element.dataset)) {
+      if (key.startsWith(BRIDGE_OPTION) && key.length > BRIDGE_OPTION.length) {
+        const name = key.slice(BRIDGE_OPTION.length);
+        options[name.charAt(0).toLowerCase() + name.slice(1)] = value;
+      }
+    }
+    return options;
+  }
+
+  const bindings = {
+    "menu-item"(element, options) {
+      const id = options.id || options.title;
+      if (!id) return;
+
+      declared["menu-item"].set(id, element);
+      const data = { id, title: options.title || id };
+      if (options.shortcut) data.shortcut = options.shortcut;
+      TurboDesktop.sendBridgeMessage("menu-item", "connect", data);
+    },
+
+    shortcut(element, options) {
+      if (!options.accelerator) return;
+
+      const id = options.id || options.accelerator;
+      declared.shortcut.set(id, element);
+      element.dataset.turboDesktopShortcut = options.accelerator;
+      TurboDesktop.sendBridgeMessage("shortcut", "register", {
+        id,
+        accelerator: options.accelerator,
+      });
+    },
+
+    notification(element) {
+      // Read when it is pressed, not when it is bound: the title and body
+      // may have been changed since.
+      element.addEventListener("click", () => {
+        const { title, body } = optionsOf(element);
+        TurboDesktop.sendBridgeMessage("notification", "show", {
+          title: title || "",
+          body: body || "",
+        });
+      });
+    },
+
+    badge(_element, options) {
+      TurboDesktop.sendBridgeMessage("badge", "set", { count: Number(options.count) || 0 });
+    },
+  };
+
+  function bindDeclaredComponents() {
+    // Whatever was declared by a page that has since gone.
+    for (const [id, element] of declared["menu-item"]) {
+      if (element.isConnected) continue;
+      declared["menu-item"].delete(id);
+      TurboDesktop.sendBridgeMessage("menu-item", "unregister", { id });
+    }
+    for (const [id, element] of declared.shortcut) {
+      if (element.isConnected) continue;
+      declared.shortcut.delete(id);
+      TurboDesktop.sendBridgeMessage("shortcut", "unregister", {
+        accelerator: element.dataset.turboDesktopShortcut,
+      });
+    }
+
+    document.querySelectorAll(`[${BRIDGE_ATTRIBUTE}]`).forEach((element) => {
+      if (boundElements.has(element)) return;
+      boundElements.add(element);
+
+      const bind = bindings[element.getAttribute(BRIDGE_ATTRIBUTE)];
+      if (bind) bind(element, optionsOf(element));
+    });
+  }
+
+  onBridgeResponse((event) => {
+    const { component, event: name, data } = event.payload || {};
+    const chosen =
+      (component === "menu-item" && name === "clicked") ||
+      (component === "shortcut" && name === "triggered");
+    if (!chosen || !data) return;
+
+    const element = declared[component].get(data.id);
+    if (element && element.isConnected) element.click();
+  });
+
+  document.addEventListener("turbo:load", bindDeclaredComponents);
+  document.addEventListener("turbo:render", bindDeclaredComponents);
+  document.addEventListener("turbo:frame-load", bindDeclaredComponents);
+
   // ─── Connection & Visit Errors ─────────────────────────────────────────────
 
   /**
@@ -996,6 +1105,7 @@
 
   whenTheDocumentIsReady(() => {
     loadTheInspector();
+    bindDeclaredComponents();
 
     // For a script that would rather be told than check: TurboDesktop is
     // there before it, but the document was not.

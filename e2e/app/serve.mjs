@@ -59,6 +59,7 @@ function page(title, body) {
       <a id="to-new-task" href="/tasks/new">New task</a>
       <a id="to-edit-task" href="/tasks/1/edit">Edit task</a>
       <a id="to-report" href="/reports/1">Report</a>
+      <a id="to-declared" href="/declared">Declared</a>
       <a id="to-dashboard" href="/dashboard">Dashboard</a>
       <a id="to-component" href="/handled-by-a-component">Handled by a component</a>
       <a id="to-broken" href="/boom">Broken</a>
@@ -75,6 +76,16 @@ const PAGES = {
   "/tasks/new": () => page("New task", '<form id="form"><input name="title"></form>'),
   "/tasks/1/edit": () => page("Edit task", '<form id="form"><input name="title" value="One"></form>'),
   "/reports/1": () => page("Report", "<p>Figures</p>"),
+  // Components declared in the markup, the way the Rails helper writes them.
+  "/declared": () =>
+    page(
+      "Declared",
+      `<button id="export"
+               data-turbo-desktop-bridge="menu-item"
+               data-turbo-desktop-bridge-title="Export PDF"
+               data-turbo-desktop-bridge-shortcut="CmdOrCtrl+E"
+               onclick="window.__exported = (window.__exported || 0) + 1">Export PDF</button>`
+    ),
   "/dashboard": () => page("Dashboard", "<p>Overview</p>"),
   "/handled-by-a-component": () => page("Not shown", "<p>The shell should never load this.</p>"),
 };

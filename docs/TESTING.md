@@ -37,6 +37,7 @@ quits is not done until it is covered there.
 | Notifications | `a notification is shown, or the page is told it cannot be`, `a component saying goodbye is not shown…` |
 | Badge | `the badge is set and cleared` |
 | Menu items | `a menu item a page registers is in the menu bar`, and replacing and removing one |
+| Components declared in the markup | `an element that declares a menu item gets one, for as long as its page is shown` |
 | Global shortcuts | `a global shortcut is registered…`, `something that is not a shortcut is refused` |
 | Launch at login | `launch at login can be turned on and off` |
 | Clipboard | `clipboard text survives a write/read round trip` |

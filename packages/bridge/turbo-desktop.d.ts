@@ -219,9 +219,11 @@ export interface TurboDesktopAPI {
   dismiss(then?: DismissAction, label?: string): Promise<void>;
 
   /**
-   * Toggle the developer tools / bridge inspector.
+   * Open the webview's developer tools, or close them if they are open.
+   * Development builds only: resolves with `{ status: "unavailable" }` in an
+   * app built for release.
    */
-  toggleDevTools(): void;
+  toggleDevTools(): Promise<unknown | null>;
 
   /**
    * Files dragged onto a window from the Finder or Explorer, with their real
