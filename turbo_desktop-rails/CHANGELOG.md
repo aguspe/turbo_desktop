@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.2 (2026-09-27)
+
+Version aligned with the desktop shell's 0.2.2 release. The CLI now scaffolds
+new apps with `gem "turbo_desktop-rails", "~> 0.2"`; it previously wrote
+`"~> 0.1"`, which resolved to 0.1.1. First 0.2.x version published to RubyGems.
+No gem-side API changes.
+
 ## 0.2.1 (2026-07-29)
 
 Version aligned with the desktop shell's 0.2.1 release, which fixes bridge
