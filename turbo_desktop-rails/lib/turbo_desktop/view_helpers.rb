@@ -78,8 +78,11 @@ module TurboDesktop
 
     # Same-origin URL of the inspector entry module, under the engine's mount
     # path (configurable via config.inspector_mount_path).
+    #
+    # Asked for by version: a webview that has the last version's inspector
+    # would go on using its copy, and has none of this address.
     def turbo_desktop_inspector_url
-      "#{TurboDesktop.configuration.inspector_mount_path.chomp("/")}/inspector.js"
+      "#{TurboDesktop.configuration.inspector_mount_path.chomp("/")}/inspector.js?v=#{TurboDesktop::VERSION}"
     end
 
     private

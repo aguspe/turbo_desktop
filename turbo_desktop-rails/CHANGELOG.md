@@ -2,8 +2,9 @@
 
 ## 0.2.4 (2026-09-27)
 
-Version aligned with the desktop shell's 0.2.4 release. No gem-side API
-changes. What changed in the shell:
+Version aligned with the desktop shell's 0.2.4 release. In the gem, the Dev
+Inspector's scripts are served so that an upgrade takes effect at once. What
+changed in the shell:
 
 ### Fixed
 
@@ -39,7 +40,8 @@ changes. What changed in the shell:
 - The Dev Inspector stays through Turbo visits. It was in the body, which
   Turbo replaces.
 - The Dev Inspector's scripts are asked about every time rather than cached
-  for an hour, which kept the old inspector running after an upgrade.
+  for an hour, which kept the old inspector running after an upgrade, and
+  the inspector is asked for by the gem's version.
 - Notifications appear under `tauri dev` on macOS.
 - A file dialog can be given a default name and the kinds of file to offer.
 - Two bridge controllers on one page keep their own component names.

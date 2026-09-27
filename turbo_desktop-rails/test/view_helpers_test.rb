@@ -185,9 +185,16 @@ class ViewHelpersTest < Minitest::Test
     assert_includes host.turbo_desktop_inspector_meta_tag.to_s, "turbo-desktop-inspector"
     assert_includes host.turbo_desktop_inspector_meta_tag.to_s, "enabled"
     # carries the same-origin inspector URL (fallback path outside a mounted app)
-    assert_includes host.turbo_desktop_inspector_meta_tag.to_s, 'data-inspector-url="/turbo-desktop/inspector.js"'
+    assert_includes host.turbo_desktop_inspector_meta_tag.to_s,
+                    %(data-inspector-url="/turbo-desktop/inspector.js?v=#{TurboDesktop::VERSION}")
   ensure
     TurboDesktop.configuration.inspector_enabled = false
+  end
+
+  # A webview that has the last version's inspector goes on using it until
+  # its copy expires. A new version is a new address, which it has no copy of.
+  def test_the_inspector_is_asked_for_by_version
+    assert_equal "/turbo-desktop/inspector.js?v=#{TurboDesktop::VERSION}", ViewHelpersTestHost.new(DESKTOP_UA).turbo_desktop_inspector_url
   end
 
   def test_inspector_meta_tag_absent_when_disabled
