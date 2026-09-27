@@ -18,6 +18,10 @@ changes. What changed in the shell:
   arrived and modals did not open.
 - A rule that opens a modal, a new window or a native screen no longer also
   navigates the main window to the same URL.
+- Quitting the app stops the server it started. The shell asked it to stop and
+  left before it had.
+- Ctrl+C on `turbo-desktop dev`, or a `kill`, quits the app properly rather
+  than ending it where it stands and leaving the server behind.
 - Two bridge controllers on one page keep their own component names.
 - In development, the error page opens in the app rather than in the browser.
 - The offline banner goes away when the next request succeeds.
