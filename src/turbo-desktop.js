@@ -1083,9 +1083,15 @@
 
   // Decided once the page has a head: the tag that turns the inspector on is
   // in it.
+  // Asked for twice: when the document is ready, and again by the shell once
+  // the page has loaded. A script the shell runs before the page cannot
+  // always import a module, and one it runs afterwards can. Whichever gets
+  // there first starts the inspector, once.
+  let inspectorStarted = false;
+
   function loadTheInspector() {
     TurboDesktop._inspectorWanted = inspectorEnabled();
-    if (!INVOKE || !TurboDesktop._inspectorWanted) return;
+    if (!INVOKE || !TurboDesktop._inspectorWanted || inspectorStarted) return;
 
     // Resolve the inspector entry URL, in priority order:
     //   1. an explicit override global,
@@ -1099,9 +1105,14 @@
       (inspectorMeta && inspectorMeta.dataset && inspectorMeta.dataset.inspectorUrl) ||
       "./inspector.js";
     import(inspectorUrl)
-      .then(function (m) { m.startInspector(TurboDesktop, { doc: document, win: window }); })
+      .then(function (m) {
+        if (inspectorStarted) return;
+        inspectorStarted = true;
+        m.startInspector(TurboDesktop, { doc: document, win: window });
+      })
       .catch(function (e) { console.error("[turbo-desktop] inspector failed to load", e); });
   }
+  TurboDesktop._loadInspector = loadTheInspector;
 
   whenTheDocumentIsReady(() => {
     loadTheInspector();

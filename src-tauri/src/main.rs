@@ -87,8 +87,17 @@ fn main() {
         // Inject turbo-desktop.js into every page load across all webviews.
         .on_page_load(|webview, payload| {
             if let PageLoadEvent::Finished = payload.event() {
+                // Already there in a window this shell built, which runs it
+                // before the page. Does nothing the second time.
                 let js = include_str!("../../src/turbo-desktop.js");
                 let _ = webview.eval(js);
+
+                // The inspector is a module, and a script run before the
+                // page cannot always import one. This one can.
+                let _ = webview.eval(
+                    "window.__TURBO_DESKTOP__ && window.__TURBO_DESKTOP__._loadInspector \
+                     && window.__TURBO_DESKTOP__._loadInspector()",
+                );
 
                 log::info!("Injected turbo-desktop.js into {}", payload.url());
             }

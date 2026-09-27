@@ -1346,3 +1346,16 @@ describe("TurboDesktop.toggleDevTools", () => {
     assertDeepEqual(asked.at(-1), { component: "devtools", event: "toggle", data: {} });
   });
 });
+
+describe("loading the Dev Inspector", () => {
+  it("can be asked for again by the shell, and starts once", async () => {
+    const { window } = createEnvironment({ invoke: () => undefined });
+    await tick();
+
+    assert.equal(typeof window.TurboDesktop._loadInspector, "function");
+    // Nothing on the page asks for the inspector, so asking changes nothing.
+    window.TurboDesktop._loadInspector();
+    window.TurboDesktop._loadInspector();
+    assert.equal(window.TurboDesktop._inspectorWanted, false);
+  });
+});
