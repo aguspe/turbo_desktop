@@ -9,7 +9,7 @@ This gem gives your Rails app awareness of the Turbo Desktop shell, exactly like
 Add to your Gemfile:
 
 ```ruby
-gem "turbo_desktop-rails"
+gem "turbo_desktop-rails", "~> 0.2"
 ```
 
 Then run:
@@ -23,7 +23,7 @@ rails generate turbo_desktop:install
 
 ### Detection
 
-The gem detects Turbo Desktop requests via the User-Agent header (`Turbo Desktop/0.0.1 (macOS; aarch64)`).
+The gem detects Turbo Desktop requests via the User-Agent header (`Turbo Desktop/0.2.3 (macOS; aarch64)`).
 
 ```ruby
 # In controllers
@@ -103,7 +103,7 @@ end
 
 ## Requirements
 
-- Ruby >= 3.3
+- Ruby >= 3.2
 - Rails >= 7.0
 - turbo-rails >= 1.0
 

@@ -10,6 +10,12 @@ module TurboDesktop
   # path traversal). Enabled implicitly by mounting the engine; the meta-tag
   # helper points the shell at these URLs.
   class InspectorAssetsController < ActionController::Base
+    # These are public, static modules fetched by import(), which is a plain
+    # GET for JavaScript. Rails reads that as a cross-origin <script> embed and
+    # refuses it with a 422. Nothing here depends on the session or carries
+    # per-user data, so there is nothing for that check to protect.
+    skip_forgery_protection
+
     ASSET_ROOT = TurboDesktop::Engine.root.join("lib/turbo_desktop/inspector_assets").freeze
 
     # Relative paths (as requested by the browser) → allowed. Anything else 404s.

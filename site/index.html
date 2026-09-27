@@ -750,7 +750,7 @@
     <h1><span class="gradient-text">Turbo Desktop</span></h1>
     <p class="tagline">Turbo Native for Desktop &mdash; wrap your Rails app in a native macOS / Windows / Linux shell powered by Tauri 2</p>
     <div class="badges">
-      <span class="badge accent">v0.2.2</span>
+      <span class="badge accent">v0.2.3</span>
       <span class="badge accent">Tauri 2</span>
       <span class="badge">Turbo Drive</span>
       <span class="badge">Hotwire Native</span>
@@ -854,7 +854,7 @@
 
     <h3>JavaScript API</h3>
     <p>The injected <code>window.TurboDesktop</code> object exposes the full native bridge:</p>
-    <pre><code>TurboDesktop.version          <span class="cm">// "0.2.2"</span>
+    <pre><code>TurboDesktop.version          <span class="cm">// "0.2.3"</span>
 TurboDesktop.isNative          <span class="cm">// true</span>
 TurboDesktop.<span class="fn">proposeVisit</span>(url, action)          <span class="cm">// Send visit to Rust shell</span>
 TurboDesktop.<span class="fn">setTitle</span>(title)                     <span class="cm">// Update window title bar</span>
@@ -965,7 +965,7 @@ TurboDesktop.dragDrop.<span class="fn">onDrop</span>(cb)                  <span 
         <p>
           On launch, Rust reads <code>turbo-desktop.config.json</code> for your <code>server_url</code>
           (falls back to <code>localhost:3000</code>), sets a custom User-Agent
-          (<code>Turbo Desktop/0.2.2 (macOS; aarch64)</code>), and navigates the 1200&times;800 main window to your app.
+          (<code>Turbo Desktop/0.2.3 (macOS; aarch64)</code>), and navigates the 1200&times;800 main window to your app.
         </p>
         <pre><code><span class="cm">// main.rs &mdash; startup</span>
 <span class="kw">let</span> app_config = window::<span class="fn">load_config</span>(<span class="ty">None</span>);
@@ -1266,7 +1266,7 @@ rails generate turbo_desktop:install</code></pre>
     <h3>Detection</h3>
     <p>
       Detects desktop app requests via the User-Agent header. The Tauri shell sends
-      <code>Turbo Desktop/0.2.2 (macOS; aarch64)</code>. The detection pattern is configurable.
+      <code>Turbo Desktop/0.2.3 (macOS; aarch64)</code>. The detection pattern is configurable.
     </p>
 
     <h3>View Helpers</h3>
@@ -1474,7 +1474,7 @@ npx turbo-desktop dev</code></pre>
           </tr>
           <tr>
             <td>Ecosystem maturity</td>
-            <td>New (v0.2.2)</td>
+            <td>New (v0.2.3)</td>
             <td>Mature (since 2013)</td>
           </tr>
           <tr class="highlight-row">
@@ -1660,7 +1660,7 @@ npm install</code></pre>
         <pre><code>{
   <span class="st">"server_url"</span>: <span class="st">"http://localhost:3000"</span>,
   <span class="st">"app_name"</span>: <span class="st">"My App"</span>,
-  <span class="st">"user_agent"</span>: <span class="st">"Turbo Desktop/0.2.2 (macOS; aarch64)"</span>,
+  <span class="st">"user_agent"</span>: <span class="st">"Turbo Desktop/0.2.3 (macOS; aarch64)"</span>,
   <span class="st">"window"</span>: { <span class="st">"width"</span>: <span class="nr">1200</span>, <span class="st">"height"</span>: <span class="nr">800</span> },
   <span class="st">"path_configuration_url"</span>: <span class="st">"http://localhost:3000/turbo-desktop/path-configuration.json"</span>
 }</code></pre>
