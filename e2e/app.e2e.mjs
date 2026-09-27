@@ -160,7 +160,7 @@ before(async () => {
 
 after(async () => {
   try {
-    if (browser) await browser.deleteSession();
+    if (browser) await browser.deleteSession().catch(() => {});
   } finally {
     if (driver) driver.kill();
     rmSync(scratch, { recursive: true, force: true });
@@ -538,10 +538,12 @@ test("the Dev Inspector loads and opens with its shortcut", async () => {
 
 test("a page the server fails on is reported, and the banner clears on the next good one", async () => {
   await startOver();
+  // Kept as a list, not an object: WebDriver takes any returned object with
+  // an `error` key for a failure of its own.
   await browser.execute(() => {
     window.__errors = [];
     document.addEventListener("turbo-desktop:visit-error", (event) => {
-      window.__errors.push({ error: event.detail.error, status: event.detail.status });
+      window.__errors.push([event.detail.error, event.detail.status, typeof event.detail.retry]);
     });
   });
 
@@ -550,10 +552,16 @@ test("a page the server fails on is reported, and the banner clears on the next 
     label: "the failure to be reported",
   });
 
-  assert.deepEqual(await browser.execute(() => window.__errors[0]), {
-    error: "http_failure",
-    status: 500,
-  });
+  assert.deepEqual(await browser.execute(() => window.__errors[0]), [
+    "http_failure",
+    500,
+    "function",
+  ]);
+  assert.equal(
+    await browser.execute((id) => Boolean(document.getElementById(id)), BANNER),
+    true,
+    "the failure was reported to the page but not shown to the person"
+  );
 
   await startOver();
   await click("to-tasks");
@@ -599,11 +607,14 @@ test("the app notices its server going away, and coming back", async () => {
 
 // ─── Closing the app ─────────────────────────────────────────────────────────
 //
-// Last, because it ends the session.
+// Last, because it ends the app.
 
-test("quitting the app stops the server it started", async () => {
-  await browser.deleteSession();
-  browser = null;
+test("closing the app stops the server it started", async () => {
+  await startOver();
+
+  // The last window closing is how an app is quit here. Ending the WebDriver
+  // session instead kills the process outright, which is a crash, not a quit.
+  await browser.closeWindow();
 
   await waitFor(async () => !(await serverAnswers()), {
     label: "the server to stop",

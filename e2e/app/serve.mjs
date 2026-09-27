@@ -39,6 +39,9 @@ function page(title, body) {
   <head>
     <title>${title}</title>
     <meta name="turbo-desktop-inspector" content="enabled" data-inspector-url="/turbo-desktop/inspector.js">
+    <!-- Turbo fetches a link when the pointer reaches it. Off, so that a
+         request seen by the server is a page somebody actually visited. -->
+    <meta name="turbo-prefetch" content="false">
     <script src="/turbo.js"></script>
   </head>
   <body>
