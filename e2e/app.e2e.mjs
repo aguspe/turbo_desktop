@@ -659,7 +659,7 @@ test("the Dev Inspector loads and opens with its shortcut", async () => {
         }
       );
     });
-    throw new Error(`${error.message} — ${why.join("; ")}`);
+    throw new Error(`${error.message} — ${why.join("; ")}`, { cause: error });
   }
   const hidden = await browser.execute(
     () => document.querySelector("[data-turbo-desktop-inspector]").style.display
