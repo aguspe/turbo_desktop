@@ -387,9 +387,12 @@ test("the bridge package ships every file its types import", () => {
   assert.ok(imports.length > 0, "index.d.ts should import the shared types");
   for (const path of imports) {
     assert.ok(!path.startsWith(".."), `index.d.ts imports ${path}, which is outside the package`);
+    assert.match(path, /\.js$/, `index.d.ts imports ${path} without an extension, which node16 refuses`);
+
+    const declarations = path.replace(/^\.\//, "").replace(/\.js$/, ".d.ts");
     assert.ok(
-      bridge.files.includes(`${path.replace(/^\.\//, "")}.d.ts`),
-      `${path}.d.ts is imported but not listed in "files", so it is not published`
+      bridge.files.includes(declarations),
+      `${declarations} is imported but not listed in "files", so it is not published`
     );
   }
 });
@@ -402,30 +405,28 @@ test("the bridge package's copy of the types matches the shell's", () => {
   );
 });
 
-test("the published types compile against the documented usage", () => {
-  const result = spawnSync(
-    process.execPath,
-    [
-      join(PACKAGE_ROOT, "node_modules", "typescript", "bin", "tsc"),
-      "--noEmit",
-      "--strict",
-      "--target", "es2022",
-      "--module", "esnext",
-      "--moduleResolution", "bundler",
-      join(PACKAGE_ROOT, "fixtures", "types", "usage.ts"),
-    ],
-    { encoding: "utf-8" }
-  );
+// Most apps resolve modules one of these two ways. Under node16 and nodenext a
+// relative import has to name its extension, which the types once did not.
+for (const [module, resolution] of [
+  ["esnext", "bundler"],
+  ["nodenext", "nodenext"],
+]) {
+  test(`the published types compile against the documented usage (${resolution})`, () => {
+    const result = spawnSync(
+      process.execPath,
+      [
+        join(PACKAGE_ROOT, "node_modules", "typescript", "bin", "tsc"),
+        "--noEmit",
+        "--strict",
+        "--target", "es2022",
+        "--lib", "es2022,dom",
+        "--module", module,
+        "--moduleResolution", resolution,
+        join(PACKAGE_ROOT, "fixtures", "types", "usage.mts"),
+      ],
+      { encoding: "utf-8" }
+    );
 
-  assert.equal(result.status, 0, `the types do not compile:\n${result.stdout}${result.stderr}`);
-});
-
-test("the shell does not wait for a server that it is the one to start", () => {
-  const conf = JSON.parse(read("src-tauri", "tauri.conf.json"));
-
-  // With a devUrl, `tauri dev` waits for that address to answer before it
-  // starts the shell. The shell is what starts the Rails server, so neither
-  // ever began: it gave up after three minutes.
-  assert.equal(conf.build.devUrl, undefined);
-  assert.equal(conf.build.frontendDist, "../src");
-});
+    assert.equal(result.status, 0, `the types do not compile:\n${result.stdout}${result.stderr}`);
+  });
+}

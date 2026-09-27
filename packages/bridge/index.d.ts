@@ -12,9 +12,10 @@ export type {
   WindowInfo,
   DismissAction,
   DragDropPayload,
-} from "./turbo-desktop";
+  VisitFailure,
+} from "./turbo-desktop.js";
 
-import type { TurboDesktopAPI, BridgeComponent as BridgeComponentClass, BridgeResponse } from "./turbo-desktop";
+import type { TurboDesktopAPI, BridgeComponent as BridgeComponentClass, BridgeResponse } from "./turbo-desktop.js";
 
 /** The main Turbo Desktop API (from `window.TurboDesktop`). */
 export declare const TurboDesktop: TurboDesktopAPI;

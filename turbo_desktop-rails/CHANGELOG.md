@@ -2,11 +2,34 @@
 
 ## 0.2.4 (2026-09-27)
 
-Version aligned with the desktop shell's 0.2.4 release, which completes the
-TypeScript definitions and fixes the `turbo-desktop-bridge` package, whose
-types imported a file it did not ship. The README's quick start now mounts the
-engine instead of pointing at a route that does not exist. No gem-side API
-changes.
+Version aligned with the desktop shell's 0.2.4 release. No gem-side API
+changes. What changed in the shell:
+
+### Fixed
+
+- Opening the app starts the Rails server. `tauri dev` used to wait for the
+  server before starting the shell that starts it, and gave up after three
+  minutes unless a server was already running.
+- The server starts on the project's Ruby. Commands ran through a login shell,
+  which does not read `~/.zshrc` or `~/.bashrc`, where rbenv, asdf, nvm and
+  mise install themselves, so they found the system's Ruby.
+- Path configuration rules are fetched again when the server answers. An app
+  that starts its own server finds it down at launch, so the rules never
+  arrived and modals did not open.
+- A rule that opens a modal, a new window or a native screen no longer also
+  navigates the main window to the same URL.
+- Two bridge controllers on one page keep their own component names.
+- In development, the error page opens in the app rather than in the browser.
+- The offline banner goes away when the next request succeeds.
+- `TurboDesktop.platform` reports the platform the app is running on. It said
+  `"macos"` everywhere.
+- `turbo-desktop-bridge` works from TypeScript, under `bundler` and `nodenext`
+  resolution, and can be imported before the shell has injected.
+
+### Changed
+
+- The TypeScript definitions declare the whole runtime API.
+- The README's quick start mounts the engine, and lists every bridge component.
 
 ## 0.2.3 (2026-09-27)
 

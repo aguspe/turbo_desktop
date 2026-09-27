@@ -95,9 +95,9 @@ export declare class BridgeComponent {
   static component: string;
 
   /** The DOM element this component is attached to. */
-  element: HTMLElement;
+  element: Element;
 
-  constructor(element: HTMLElement);
+  constructor(element: Element);
 
   /** Called when the component connects. Sets up native event listeners. */
   connect(): void;
@@ -111,6 +111,13 @@ export declare class BridgeComponent {
   /** Override to handle messages from the native shell. */
   onReceive(message: BridgeResponse): void;
 }
+
+/** Why a visit failed, in Hotwire Native's vocabulary. */
+export type VisitFailure =
+  | "network_failure"
+  | "timeout_failure"
+  | "http_failure"
+  | "page_load_failure";
 
 /** What the screen underneath a modal does when the modal is dismissed. */
 export type DismissAction = "recede" | "refresh" | "resume";
@@ -215,13 +222,13 @@ export interface TurboDesktopAPI {
    */
   dragDrop: {
     /** Files were dropped. Returns a function that stops listening. */
-    onDrop(callback: (drop: DragDropPayload) => void): unknown;
+    onDrop(callback: (drop: DragDropPayload) => void): () => boolean;
 
-    /** A drag entered the window. */
-    onEnter(callback: (drop: DragDropPayload) => void): unknown;
+    /** A drag entered the window. Returns a function that stops listening. */
+    onEnter(callback: (drop: DragDropPayload) => void): () => boolean;
 
-    /** A drag left the window without dropping. */
-    onLeave(callback: (drop: DragDropPayload) => void): unknown;
+    /** A drag left the window without dropping. Returns a function that stops listening. */
+    onLeave(callback: (drop: DragDropPayload) => void): () => boolean;
   };
 
   /**
@@ -247,6 +254,16 @@ export interface TurboDesktopAPI {
     /** The current state as the operating system has it. */
     isEnabled(): Promise<boolean>;
   };
+
+  /**
+   * Report a failed visit the way the shell does: dispatches
+   * `turbo-desktop:visit-error`, and shows the shell's banner unless a
+   * listener cancels it. For an app that detects a failure of its own.
+   */
+  reportVisitError(
+    error: VisitFailure,
+    options?: { status?: number | null; retry?: (() => void) | null }
+  ): void;
 
   /**
    * Why a visit failed, in Hotwire Native's vocabulary. Compare against

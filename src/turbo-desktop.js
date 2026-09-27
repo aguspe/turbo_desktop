@@ -237,6 +237,9 @@
           }
         };
 
+        // One listener per process. A controller that connects again, as it
+        // does when Turbo brings its page back, replaces the one it had.
+        this.offOutput(id);
         this._listeners.set(id, onBridgeResponse(handler));
       },
 
@@ -279,6 +282,9 @@
           }
         };
 
+        // One listener per process. A controller that connects again, as it
+        // does when Turbo brings its page back, replaces the one it had.
+        this.offOutput(id);
         this._listeners.set(id, onBridgeResponse(handler));
       },
 
@@ -910,7 +916,15 @@
   /** A visit that completed with an error status. */
   document.addEventListener("turbo:before-fetch-response", (event) => {
     const response = event.detail && event.detail.fetchResponse;
-    if (!response || response.succeeded || response.statusCode < 500) return;
+    if (!response) return;
+
+    // The server answered, so it can be reached. Nothing else takes the
+    // banner down after a single failed request: the shell reports the
+    // connection changing, and here it never changed.
+    if (response.succeeded || response.statusCode < 500) {
+      hideOfflineBanner();
+      return;
+    }
 
     reportVisitError(TurboDesktop.errors.HTTP_FAILURE, { status: response.statusCode });
   });

@@ -1020,3 +1020,83 @@ describe("TurboDesktop.platform", () => {
     assert.equal(platformFor("MyApp/3.1 Turbo Desktop/0.2.4 (Linux; aarch64)"), "linux");
   });
 });
+
+describe("the offline banner", () => {
+  const BANNER = "turbo-desktop-offline-overlay";
+
+  function fire(window, name, detail) {
+    window.document.dispatchEvent(new window.CustomEvent(name, { detail, cancelable: true }));
+  }
+
+  it("goes away when the next request succeeds", () => {
+    const { window } = createEnvironment({ invoke: () => undefined });
+
+    fire(window, "turbo:fetch-request-error", { url: "https://myapp.test/tasks" });
+    assert.ok(window.document.getElementById(BANNER), "test setup: the banner never appeared");
+
+    // One failed request, and the server is fine. Nothing else would take the
+    // banner down: the shell only reports the connection changing, and it
+    // has not changed.
+    fire(window, "turbo:before-fetch-response", {
+      fetchResponse: { succeeded: true, statusCode: 200 },
+    });
+
+    assert.equal(window.document.getElementById(BANNER), null);
+  });
+
+  it("stays while requests keep failing", () => {
+    const { window } = createEnvironment({ invoke: () => undefined });
+
+    fire(window, "turbo:fetch-request-error", { url: "https://myapp.test/tasks" });
+    fire(window, "turbo:before-fetch-response", {
+      fetchResponse: { succeeded: false, statusCode: 503 },
+    });
+
+    assert.ok(window.document.getElementById(BANNER));
+  });
+
+  it("goes away when the server answers with an error page of its own", () => {
+    const { window } = createEnvironment({ invoke: () => undefined });
+
+    fire(window, "turbo:fetch-request-error", { url: "https://myapp.test/tasks" });
+    fire(window, "turbo:before-fetch-response", {
+      fetchResponse: { succeeded: false, statusCode: 422 },
+    });
+
+    assert.equal(
+      window.document.getElementById(BANNER),
+      null,
+      "a 422 is the server answering; it is reachable"
+    );
+  });
+});
+
+describe("listening to a process's output twice", () => {
+  for (const namespace of ["shell", "sudo"]) {
+    it(`${namespace}.onOutput replaces the earlier listener for that process`, () => {
+      const { window } = createEnvironment();
+      const td = window.TurboDesktop;
+      const seen = [];
+
+      // What a Stimulus controller does when Turbo brings its page back.
+      td[namespace].onOutput("job-1", (message) => seen.push(["first", message.line]));
+      td[namespace].onOutput("job-1", (message) => seen.push(["second", message.line]));
+      td.__receive("bridge-response", {
+        component: namespace,
+        event: "stdout",
+        data: { id: "job-1", line: "hi" },
+      });
+
+      assertDeepEqual(seen, [["second", "hi"]]);
+
+      td[namespace].offOutput("job-1");
+      td.__receive("bridge-response", {
+        component: namespace,
+        event: "stdout",
+        data: { id: "job-1", line: "after off" },
+      });
+
+      assert.equal(seen.length, 1, "a listener outlived offOutput");
+    });
+  }
+});
