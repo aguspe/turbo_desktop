@@ -261,6 +261,7 @@ test("the documentation pages quote the current version", () => {
 });
 
 const READMES = [["README.md"], ["turbo_desktop-rails", "README.md"]];
+const GUIDES = [...READMES, ["docs", "DISTRIBUTION.md"], ["docs", "RELEASING.md"]];
 
 test("the READMEs tell readers to pin the gem the way the CLI does", () => {
   for (const readme of READMES) {
@@ -278,8 +279,8 @@ test("the READMEs tell readers to pin the gem the way the CLI does", () => {
   }
 });
 
-test("the READMEs quote the current version", () => {
-  for (const readme of READMES) {
+test("the READMEs and guides quote the current version", () => {
+  for (const readme of GUIDES) {
     const quoted = [...read(...readme).matchAll(/(?:Turbo Desktop\/|\bv)(\d+\.\d+\.\d+)/g)].map(
       (match) => match[1]
     );
@@ -305,4 +306,14 @@ test("the README's Docs link opens the documentation, not the README again", () 
 
   assert.ok(link, "README.md should link to the docs");
   assert.equal(link[1], "https://aguspe.github.io/turbo_desktop/docs/");
+});
+
+test("the release guide covers every place a release has to reach", () => {
+  const guide = read("docs", "RELEASING.md");
+
+  // 0.2.1 was tagged and announced but never reached either registry, because
+  // nothing written down said that a tag alone publishes neither.
+  for (const step of ["gem push", "npm publish", "git tag", "turbo_desktop_site"]) {
+    assert.ok(guide.includes(step), `docs/RELEASING.md should cover \`${step}\``);
+  }
 });
