@@ -240,3 +240,22 @@ test("the CLI carries no hard-coded gem constraint", () => {
     "the next-steps text should point at the published gem, not a local path"
   );
 });
+
+test("tauri.conf.json reports the same version as package.json", () => {
+  const conf = JSON.parse(read("src-tauri", "tauri.conf.json"));
+
+  assert.equal(conf.version, packageVersion(), "tauri.conf.json version drifted from package.json");
+});
+
+test("the documentation pages quote the current version", () => {
+  for (const page of [["docs", "index.html"], ["site", "index.html"]]) {
+    const quoted = [...read(...page).matchAll(/(?:Turbo Desktop\/|\bv)(\d+\.\d+\.\d+)/g)].map(
+      (match) => match[1]
+    );
+
+    assert.ok(quoted.length > 0, `${page.join("/")} should quote a version`);
+    for (const version of quoted) {
+      assert.equal(version, packageVersion(), `${page.join("/")} quotes ${version}`);
+    }
+  }
+});
