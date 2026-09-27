@@ -16,12 +16,16 @@ require "turbo_desktop/configuration"
 # more than one Rails::Application in a process is not allowed, so any test that
 # needs routes (path-configuration, inspector assets) uses this one.
 require "rails"
+require "action_controller/railtie"
 require "turbo_desktop/engine"
 
 class DummyApp < Rails::Application
   config.eager_load = false
   config.secret_key_base = "test-secret-key-base-for-turbo-desktop-tests"
   config.hosts.clear
+  # What `load_defaults` gives every real app. Without it no controller here
+  # protects against forgery, and tests cannot see what that protection refuses.
+  config.action_controller.default_protect_from_forgery = true
 end
 
 Rails.application.initialize! unless Rails.application.initialized?

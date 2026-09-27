@@ -2,6 +2,14 @@ require "test_helper"
 
 # Uses the shared app + mounted engine from test_helper.rb.
 class InspectorAssetsControllerTest < ActionDispatch::IntegrationTest
+  def with_forgery_protection
+    original = ActionController::Base.allow_forgery_protection
+    ActionController::Base.allow_forgery_protection = true
+    yield
+  ensure
+    ActionController::Base.allow_forgery_protection = original
+  end
+
   def test_serves_inspector_entry_module
     get "/turbo-desktop/inspector.js"
     assert_response :success
@@ -20,6 +28,19 @@ class InspectorAssetsControllerTest < ActionDispatch::IntegrationTest
   def test_submodule_body_is_the_real_module
     get "/turbo-desktop/inspector/state.js"
     assert_includes response.body, "class InspectorState"
+  end
+
+  # Rails' test environment turns forgery protection off, which is how this
+  # went unnoticed: with it on, as in every real app, a plain GET for
+  # JavaScript is refused as a cross-origin <script> embed. An import() from
+  # the shell is exactly such a request.
+  def test_modules_are_served_with_forgery_protection_on
+    with_forgery_protection do
+      %w[inspector.js inspector/panel.js].each do |asset|
+        get "/turbo-desktop/#{asset}"
+        assert_response :success, "expected #{asset} to be served with forgery protection on"
+      end
+    end
   end
 
   def test_unknown_module_is_not_found
