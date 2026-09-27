@@ -122,7 +122,7 @@ export type VisitFailure =
   | "page_load_failure";
 
 /** What the screen underneath a modal does when the modal is dismissed. */
-export type DismissAction = "recede" | "refresh" | "resume";
+export type DismissAction = "recede" | "refresh" | "resume" | "visit";
 
 /** What a drag or a drop carries. */
 export interface DragDropPayload {
@@ -216,7 +216,7 @@ export interface TurboDesktopAPI {
    * Close a modal and say what the screen underneath should do. `recede()`,
    * `refresh()` and `resume()` call this for the window the page is in.
    */
-  dismiss(then?: DismissAction, label?: string): Promise<void>;
+  dismiss(then?: DismissAction, label?: string, url?: string): Promise<void>;
 
   /**
    * Open the webview's developer tools, or close them if they are open.

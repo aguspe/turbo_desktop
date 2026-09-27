@@ -135,6 +135,14 @@ fn same_origin_url(app: &tauri::AppHandle, raw: &str) -> Result<url::Url, String
 
 /// What the screen underneath should do once a modal closes.
 ///
+/// Where a closing modal may send the window underneath: a page of the app,
+/// and nowhere else. The page asked, and a page is not trusted to say where.
+pub fn destination_on_origin(server_url: &str, url: Option<&str>) -> Option<String> {
+    let destination = url::Url::parse(url?).ok()?;
+
+    crate::security::is_trusted_origin(server_url, &destination).then(|| destination.to_string())
+}
+
 /// Named after Hotwire Native's dismissal semantics, so the same words describe
 /// the same outcome on mobile and desktop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -145,6 +153,9 @@ pub enum Dismissal {
     Refresh,
     /// Leave it exactly as it was.
     Resume,
+    /// Go somewhere else: where the modal itself was heading when it turned
+    /// out not to be a modal's page. What a saved form does.
+    Visit,
 }
 
 impl Dismissal {
@@ -152,6 +163,7 @@ impl Dismissal {
         match value.unwrap_or("resume") {
             "recede" => Self::Recede,
             "refresh" => Self::Refresh,
+            "visit" => Self::Visit,
             _ => Self::Resume,
         }
     }
@@ -161,6 +173,7 @@ impl Dismissal {
         match self {
             Self::Recede => "back",
             Self::Refresh => "refresh",
+            Self::Visit => "visit",
             Self::Resume => "none",
         }
     }
@@ -176,6 +189,7 @@ pub async fn dismiss_modal(
     webview: tauri::Webview,
     label: Option<String>,
     then: Option<String>,
+    url: Option<String>,
 ) -> Result<(), String> {
     crate::security::ensure_trusted_caller(&app, &webview)?;
 
@@ -191,11 +205,22 @@ pub async fn dismiss_modal(
     log::info!("Dismissed '{}' with {:?}", label, dismissal);
 
     if let Some(main) = app.get_webview_window("main") {
-        crate::window::deliver_to_page(
-            &main,
-            "navigate",
-            &serde_json::json!({ "action": dismissal.action() }),
-        );
+        let instruction = match dismissal {
+            Dismissal::Visit => {
+                let config = app.state::<crate::window::TurboDesktopConfig>();
+                match destination_on_origin(&config.server_url, url.as_deref()) {
+                    Some(destination) => {
+                        serde_json::json!({ "action": "visit", "url": destination })
+                    }
+                    // Nowhere it may go: reload what is there instead, so
+                    // that what the modal changed is at least shown.
+                    None => serde_json::json!({ "action": "refresh" }),
+                }
+            }
+            other => serde_json::json!({ "action": other.action() }),
+        };
+
+        crate::window::deliver_to_page(&main, "navigate", &instruction);
     }
 
     Ok(())
@@ -344,6 +369,28 @@ fn inject_turbo_desktop_js(window: &tauri::WebviewWindow) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // A form saved in a modal redirects to a page that is not a modal's. The
+    // modal closes, and the window underneath goes there.
+    #[test]
+    fn a_modal_can_send_the_window_underneath_somewhere() {
+        assert_eq!(Dismissal::parse(Some("visit")), Dismissal::Visit);
+        assert_eq!(Dismissal::Visit.action(), "visit");
+    }
+
+    #[test]
+    fn where_a_modal_sends_the_window_has_to_be_in_the_app() {
+        let server = "https://app.example.com";
+
+        assert_eq!(
+            destination_on_origin(server, Some("https://app.example.com/tasks")).as_deref(),
+            Some("https://app.example.com/tasks")
+        );
+        assert_eq!(destination_on_origin(server, Some("https://evil.example.com/")), None);
+        assert_eq!(destination_on_origin(server, Some("javascript:alert(1)")), None);
+        assert_eq!(destination_on_origin(server, Some("not a url")), None);
+        assert_eq!(destination_on_origin(server, None), None);
+    }
 
     #[test]
     fn dismissal_defaults_to_leaving_the_screen_alone() {

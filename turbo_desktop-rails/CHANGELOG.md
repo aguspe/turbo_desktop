@@ -33,6 +33,15 @@ changes. What changed in the shell:
   The helper wrote the attributes and nothing read them.
 - `TurboDesktop.toggleDevTools()` and View → Developer Tools open the
   developer tools. They logged a line and did nothing.
+- A modal that moves on to an ordinary page closes, and the window underneath
+  goes there. A form saved in a modal left the modal open on the list, and
+  the window underneath never showed what was saved.
+- The Dev Inspector stays through Turbo visits. It was in the body, which
+  Turbo replaces.
+- The Dev Inspector's scripts are asked about every time rather than cached
+  for an hour, which kept the old inspector running after an upgrade.
+- Notifications appear under `tauri dev` on macOS.
+- A file dialog can be given a default name and the kinds of file to offer.
 - Two bridge controllers on one page keep their own component names.
 - In development, the error page opens in the app rather than in the browser.
 - The offline banner goes away when the next request succeeds.

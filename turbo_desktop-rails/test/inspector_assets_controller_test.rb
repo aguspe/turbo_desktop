@@ -43,6 +43,24 @@ class InspectorAssetsControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
+  # Cached for an hour, the webview went on running the inspector of the gem
+  # that had been installed before, for an hour after an upgrade.
+  def test_the_webview_asks_again_rather_than_trusting_its_copy
+    get "/turbo-desktop/inspector.js"
+
+    assert_equal "no-cache", response.headers["Cache-Control"]
+    assert response.headers["ETag"].present?, "nothing to ask again with"
+  end
+
+  def test_a_copy_that_is_still_current_is_not_sent_again
+    get "/turbo-desktop/inspector.js"
+    etag = response.headers["ETag"]
+
+    get "/turbo-desktop/inspector.js", headers: { "If-None-Match" => etag }
+
+    assert_response :not_modified
+  end
+
   def test_unknown_module_is_not_found
     get "/turbo-desktop/inspector/nope.js"
     assert_response :not_found

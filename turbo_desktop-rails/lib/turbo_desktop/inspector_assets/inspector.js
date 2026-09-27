@@ -41,8 +41,16 @@ export function startInspector(host, { doc = document, win = window } = {}) {
     };
   }
 
+  // Beside the body, not in it: Turbo replaces the body on every visit, and
+  // took the panel with it. A page that replaces more than that gets it back.
   const panel = new InspectorPanel(state, { document: doc });
-  panel.mount(doc.body);
+  panel.mount(doc.documentElement);
+
+  const keepInThePage = () => {
+    if (panel.hostEl && !panel.hostEl.isConnected) doc.documentElement.appendChild(panel.hostEl);
+  };
+  doc.addEventListener("turbo:render", keepInThePage);
+  doc.addEventListener("turbo:load", keepInThePage);
 
   win.addEventListener("keydown", (e) => {
     if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === "D" || e.key === "d")) {

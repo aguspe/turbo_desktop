@@ -29,6 +29,7 @@ quits is not done until it is covered there.
 | A rule's `width` and `height` | `a modal is sized by its rule` |
 | `isModal`, `windowLabel` | the modal and new-window tests |
 | `recede()`, `refresh()`, `resume()`, `closeModal()` | one test each |
+| A saved form closes its modal | `saving a form in a modal closes it and shows the result underneath`, `leaving a modal by a link…` |
 | `new_window` | `a new_window rule opens a window of its own` |
 | `replace` | `a replace rule shows the page without adding to the history` |
 | `none` | `a rule of none leaves the link to a bridge component` |

@@ -36,8 +36,14 @@ module TurboDesktop
       path = ASSET_ROOT.join(rel)
       return head(:not_found) unless File.file?(path)
 
-      response.set_header("Cache-Control", "public, max-age=3600")
-      render body: File.read(path), content_type: "text/javascript"
+      body = File.read(path)
+
+      # Kept, but asked about every time: these change when the gem does, and
+      # a copy trusted for an hour is the old inspector for an hour.
+      response.set_header("Cache-Control", "no-cache")
+      return unless stale?(etag: body, public: false, template: false)
+
+      render body: body, content_type: "text/javascript"
     end
 
     private

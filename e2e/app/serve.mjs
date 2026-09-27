@@ -32,6 +32,7 @@ const RULES = {
 const INSPECTOR_MODULES = ["state.js", "panel.js", "bridge-tap.js", "catalog.js"];
 
 const requests = [];
+let saved = 0;
 
 function page(title, body) {
   return `<!doctype html>
@@ -72,8 +73,16 @@ function page(title, body) {
 
 const PAGES = {
   "/": () => page("Home", "<p>Home</p>"),
-  "/tasks": () => page("Tasks", "<ul><li>One</li><li>Two</li></ul>"),
-  "/tasks/new": () => page("New task", '<form id="form"><input name="title"></form>'),
+  "/tasks": () => page("Tasks", `<ul><li>One</li><li>Two</li></ul><p id="count">${saved} saved</p>`),
+  "/tasks/new": () =>
+    page(
+      "New task",
+      `<form id="form" action="/tasks" method="post">
+         <input id="title" name="title">
+         <button id="save" type="submit">Save</button>
+       </form>
+       <a id="cancel" href="/tasks">Cancel</a>`
+    ),
   "/tasks/1/edit": () => page("Edit task", '<form id="form"><input name="title" value="One"></form>'),
   "/reports/1": () => page("Report", "<p>Figures</p>"),
   // Components declared in the markup, the way the Rails helper writes them.
@@ -116,6 +125,15 @@ function handle(req, res) {
     }, 100);
     return;
   }
+
+  // Saving a task: the server sends the form back to the list, as Rails does.
+  if (path === "/tasks" && req.method === "POST") {
+    req.resume();
+    saved += 1;
+    res.writeHead(303, { location: "/tasks" });
+    return res.end();
+  }
+  if (path === "/__saved") return respond(res, 200, "application/json", JSON.stringify({ saved }));
 
   if (path === "/up") return respond(res, 200, "text/plain", "ok");
   if (path === "/turbo.js") return respond(res, 200, "text/javascript", TURBO);

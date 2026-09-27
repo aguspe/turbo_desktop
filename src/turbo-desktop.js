@@ -177,11 +177,14 @@
       return TurboDesktop.dismiss("resume");
     },
 
-    async dismiss(then = "resume", label = undefined) {
+    async dismiss(then = "resume", label = undefined, url = undefined) {
       if (!INVOKE) return;
 
       try {
-        await INVOKE("dismiss_modal", { label: label || null, then });
+        const request = { label: label || null, then };
+        // Where the window underneath should go, for `then: "visit"`.
+        if (url) request.url = url;
+        await INVOKE("dismiss_modal", request);
       } catch (e) {
         console.error("[turbo-desktop] Dismiss failed:", e);
       }
@@ -509,6 +512,14 @@
       // itself, and this window stays where it is.
       const decided = response ? response.action : action;
       if (decided === "none") return;
+
+      // A modal heading for a page that is not a modal's: a saved form being
+      // sent back to the list. The modal has done its work. It closes, and
+      // the window underneath goes there, so it shows what was saved.
+      if (TurboDesktop.isModal) {
+        TurboDesktop.dismiss("visit", undefined, new URL(url, window.location.href).href);
+        return;
+      }
 
       carryOn(url, decided === "replace" ? "replace" : action);
     });
@@ -874,7 +885,7 @@
         reportConnection(Boolean(detail.online), detail.error || null);
         break;
       case "navigate":
-        performNavigation(detail.action);
+        performNavigation(detail.action, detail.url);
         break;
       case "focus":
         handleFocusReturn(detail);
@@ -987,8 +998,18 @@
   /**
    * Act on what the shell asked the page underneath to do after a modal closed.
    */
-  function performNavigation(action) {
+  function performNavigation(action, url) {
     switch (action) {
+      case "visit":
+        // Replacing, not advancing: the window is being brought up to date,
+        // not taken somewhere the back button should undo.
+        if (!url) return performNavigation("refresh");
+        if (window.Turbo && window.Turbo.visit) {
+          window.Turbo.visit(url, { action: "replace" });
+        } else {
+          window.location.replace(url);
+        }
+        break;
       case "back":
         window.history.back();
         break;

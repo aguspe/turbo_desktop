@@ -295,6 +295,22 @@ The Bridge is the desktop equivalent of **Strada**. It lets your web components 
 | `updater` | Check for and install app updates |
 | `devtools` | Open the webview's developer tools (development builds) |
 
+A file dialog can be told what it is for:
+
+```js
+TurboDesktop.sendBridgeMessage("file-picker", "save", {
+  title: "Export tasks",
+  defaultName: "tasks.csv",
+  filters: [{ name: "CSV", extensions: ["csv"] }]
+})
+```
+
+Under `tauri dev` on macOS, notifications are shown through AppleScript: a
+bare binary has no bundle for the system to file them under. A built app shows
+them as its own, and asks permission the first time. Either way a Focus mode
+keeps them out of the corner of the screen and puts them in the notification
+centre.
+
 A component that cannot do its job on the machine it is running on (no
 notification service, a shortcut another application holds) answers with
 `status: "unavailable"` and the reason, rather than failing.
@@ -336,6 +352,14 @@ if (TurboDesktop.isModal) {
 }
 TurboDesktop.windowLabel         // e.g. "modal-9b8b948"
 ```
+
+#### A modal that has done its work
+
+A form in a modal is saved, and the server redirects to the list. The list is
+not a modal's page, so the modal closes and the window underneath goes there,
+showing what was saved. The same happens for a link in a modal to any page
+whose rule is not `modal`. Nothing has to be written for this: it is what
+Hotwire Native does, and it follows from the path configuration.
 
 #### Dismissing a modal
 

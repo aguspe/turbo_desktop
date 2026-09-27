@@ -161,6 +161,27 @@ pub fn asks_for_a_notification(event: &str, data: &serde_json::Value) -> bool {
         .any(|key| data[*key].as_str().is_some_and(|text| !text.trim().is_empty()))
 }
 
+/// Show a notification through AppleScript. The title and body are handed
+/// over as arguments, never written into the script, so neither can be read
+/// as part of it.
+#[cfg(all(target_os = "macos", debug_assertions))]
+fn show_without_a_bundle(title: &str, body: &str) -> bool {
+    std::process::Command::new("osascript")
+        .args([
+            "-e",
+            "on run argv",
+            "-e",
+            "display notification (item 2 of argv) with title (item 1 of argv)",
+            "-e",
+            "end run",
+            title,
+            body,
+        ])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
 async fn handle_notification(
     app: &tauri::AppHandle,
     message: &BridgeMessage,
@@ -180,6 +201,16 @@ async fn handle_notification(
     }
     if !body.is_empty() {
         notification = notification.body(body);
+    }
+
+    // An app run with `tauri dev` on macOS is a bare binary, with no bundle
+    // for the system to file its notifications under. The plugin files them
+    // under Terminal, where they are shown only if Terminal is allowed to
+    // notify, and not at all from another terminal. The system's own
+    // scripting shows them whoever asks.
+    #[cfg(all(target_os = "macos", debug_assertions))]
+    if show_without_a_bundle(title, body) {
+        return Ok(serde_json::json!({ "status": "shown", "through": "osascript" }));
     }
 
     // A machine with nothing to show notifications with is not an error in the
@@ -314,14 +345,89 @@ pub fn menu_item_chosen<R: tauri::Runtime>(app: &tauri::AppHandle<R>, name: &str
     );
 }
 
+/// What a page may say about the dialog it asks for.
+#[derive(Debug, PartialEq)]
+pub struct PickerOptions {
+    pub title: String,
+    /// The name a save dialog opens with.
+    pub default_name: Option<String>,
+    /// The kinds of file offered, as a name and its extensions.
+    pub filters: Vec<(String, Vec<String>)>,
+}
+
+impl From<&serde_json::Value> for PickerOptions {
+    fn from(data: &serde_json::Value) -> Self {
+        let title = data["title"]
+            .as_str()
+            .map(str::trim)
+            .filter(|title| !title.is_empty())
+            .unwrap_or("Select")
+            .to_string();
+
+        // The last part only. Where the file goes is for the person to say,
+        // in the dialog.
+        let default_name = data["defaultName"]
+            .as_str()
+            .and_then(|name| std::path::Path::new(name.trim()).file_name())
+            .map(|name| name.to_string_lossy().into_owned())
+            .filter(|name| !name.is_empty());
+
+        let filters = data["filters"]
+            .as_array()
+            .map(|filters| {
+                filters
+                    .iter()
+                    .filter_map(|filter| {
+                        let extensions: Vec<String> = filter["extensions"]
+                            .as_array()?
+                            .iter()
+                            .filter_map(|extension| extension.as_str())
+                            .map(|extension| extension.trim().trim_start_matches('.').to_string())
+                            .filter(|extension| !extension.is_empty())
+                            .collect();
+                        if extensions.is_empty() {
+                            return None;
+                        }
+
+                        let name = filter["name"]
+                            .as_str()
+                            .map(str::trim)
+                            .filter(|name| !name.is_empty())
+                            .map(str::to_string)
+                            .unwrap_or_else(|| extensions.join(", "));
+                        Some((name, extensions))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        Self { title, default_name, filters }
+    }
+}
+
+impl PickerOptions {
+    fn dialog(&self, app: &tauri::AppHandle) -> tauri_plugin_dialog::FileDialogBuilder<tauri::Wry> {
+        use tauri_plugin_dialog::DialogExt;
+
+        let mut dialog = app.dialog().file().set_title(&self.title);
+        if let Some(name) = &self.default_name {
+            dialog = dialog.set_file_name(name);
+        }
+        for (name, extensions) in &self.filters {
+            let extensions: Vec<&str> = extensions.iter().map(String::as_str).collect();
+            dialog = dialog.add_filter(name, &extensions);
+        }
+        dialog
+    }
+}
+
 async fn handle_file_picker(
     app: &tauri::AppHandle,
     message: &BridgeMessage,
 ) -> Result<serde_json::Value, String> {
     use tauri::Manager;
-    use tauri_plugin_dialog::DialogExt;
 
-    let title = message.data["title"].as_str().unwrap_or("Select");
+    let options = PickerOptions::from(&message.data);
 
     // E2E seam: WebDriver cannot click a native dialog, so a debug build can
     // be told what the user would have picked. The grant matches what the
@@ -341,9 +447,8 @@ async fn handle_file_picker(
     match message.event.as_str() {
         "open-folder" | "open_folder" => {
             let (tx, rx) = tokio::sync::oneshot::channel();
-            app.dialog()
-                .file()
-                .set_title(title)
+            options
+                .dialog(app)
                 .pick_folder(move |folder| {
                     let path = folder.map(|f| f.to_string());
                     let _ = tx.send(path);
@@ -362,9 +467,8 @@ async fn handle_file_picker(
         }
         "open" | "open-file" | "open_file" => {
             let (tx, rx) = tokio::sync::oneshot::channel();
-            app.dialog()
-                .file()
-                .set_title(title)
+            options
+                .dialog(app)
                 .pick_file(move |file| {
                     let path = file.map(|f| f.to_string());
                     let _ = tx.send(path);
@@ -382,9 +486,8 @@ async fn handle_file_picker(
         }
         "save" => {
             let (tx, rx) = tokio::sync::oneshot::channel();
-            app.dialog()
-                .file()
-                .set_title(title)
+            options
+                .dialog(app)
                 .save_file(move |file| {
                     let path = file.map(|f| f.to_string());
                     let _ = tx.send(path);
@@ -701,6 +804,49 @@ mod native_component_tests {
         );
         assert_eq!(menu_item_id(&json!({})), None);
         assert_eq!(menu_item_id(&json!({ "title": "" })), None);
+    }
+
+    // A save dialog that opens on an empty name, with no extension, asks the
+    // person to know the file's type. The page knows it already.
+    #[test]
+    fn a_dialog_can_be_told_the_name_and_the_kinds_of_file() {
+        let options = PickerOptions::from(&json!({
+            "title": "Export tasks",
+            "defaultName": "tasks.csv",
+            "filters": [{ "name": "CSV", "extensions": ["csv", ".txt"] }]
+        }));
+
+        assert_eq!(options.title, "Export tasks");
+        assert_eq!(options.default_name.as_deref(), Some("tasks.csv"));
+        assert_eq!(
+            options.filters,
+            vec![("CSV".to_string(), vec!["csv".to_string(), "txt".to_string()])]
+        );
+    }
+
+    #[test]
+    fn a_dialog_told_nothing_is_an_ordinary_dialog() {
+        let options = PickerOptions::from(&json!({}));
+
+        assert_eq!(options.title, "Select");
+        assert_eq!(options.default_name, None);
+        assert!(options.filters.is_empty());
+    }
+
+    #[test]
+    fn a_name_is_a_name_and_not_somewhere_to_put_it() {
+        let options = PickerOptions::from(&json!({ "defaultName": "../../etc/passwd" }));
+
+        assert_eq!(options.default_name.as_deref(), Some("passwd"));
+    }
+
+    #[test]
+    fn filters_that_say_nothing_are_left_out() {
+        let options = PickerOptions::from(&json!({
+            "filters": [{ "name": "Empty", "extensions": [] }, { "extensions": ["csv"] }, "nonsense"]
+        }));
+
+        assert_eq!(options.filters, vec![("csv".to_string(), vec!["csv".to_string()])]);
     }
 
     #[test]

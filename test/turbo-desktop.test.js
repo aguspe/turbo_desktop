@@ -1398,3 +1398,89 @@ describe("loading the Dev Inspector", () => {
     assert.equal(starts, 1);
   });
 });
+
+describe("a modal that moves on to an ordinary page", () => {
+  // What happens when a form in a modal is saved: the server redirects to the
+  // list, which is not a modal's page. The modal stayed open showing the
+  // list, and the window underneath never heard about the new record.
+  function inAModal(decision) {
+    const dom = new JSDOM(`<!DOCTYPE html><html><head><title>New task</title></head><body></body></html>`, {
+      url: "https://myapp.test/tasks/new",
+      runScripts: "dangerously",
+    });
+    const { window } = dom;
+    const calls = [];
+    const visits = [];
+
+    window.__TURBO_DESKTOP_WINDOW_LABEL__ = "modal-9b8b948";
+    window.__TAURI_INTERNALS__ = {
+      invoke: async (cmd, args) => {
+        calls.push({ cmd, args });
+        return cmd === "handle_visit_proposal" ? decision : undefined;
+      },
+    };
+    window.eval(scriptSource);
+    window.Turbo = { visit: (url, options) => visits.push({ url, ...options }) };
+
+    return { window, calls, visits };
+  }
+
+  function propose(window, url) {
+    const event = new window.CustomEvent("turbo:before-visit", {
+      detail: { url },
+      cancelable: true,
+    });
+    window.document.dispatchEvent(event);
+    return event;
+  }
+
+  it("closes, and sends the window underneath there instead", async () => {
+    const { window, calls, visits } = inAModal({ action: "advance", presentation: "default" });
+
+    propose(window, "https://myapp.test/tasks");
+    await tick();
+
+    const dismissed = calls.filter((call) => call.cmd === "dismiss_modal");
+    assertDeepEqual(dismissed.map((call) => call.args), [
+      { label: null, then: "visit", url: "https://myapp.test/tasks" },
+    ]);
+    assertDeepEqual(visits, [], "the modal went to the list itself");
+  });
+
+  it("stays open for a page that is a modal's own", async () => {
+    const { window, calls } = inAModal({ action: "none", presentation: "modal" });
+
+    propose(window, "https://myapp.test/tasks/1/edit");
+    await tick();
+
+    assert.equal(calls.filter((call) => call.cmd === "dismiss_modal").length, 0);
+  });
+
+  it("does not close the main window, which is nobody's modal", async () => {
+    const visits = [];
+    const { window, calls } = createEnvironment({
+      invoke: (cmd) =>
+        cmd === "handle_visit_proposal" ? { action: "advance", presentation: "default" } : undefined,
+    });
+    window.Turbo = { visit: (url, options) => visits.push({ url, ...options }) };
+
+    propose(window, "https://myapp.test/tasks");
+    await tick();
+
+    assert.equal(calls.filter((call) => call.cmd === "dismiss_modal").length, 0);
+    assert.equal(visits.length, 1);
+  });
+
+  it("goes where a closing modal sends it", async () => {
+    const visits = [];
+    const { window } = createEnvironment({ invoke: () => undefined });
+    window.Turbo = { visit: (url, options) => visits.push({ url, ...options }) };
+
+    window.TurboDesktop.__receive("navigate", {
+      action: "visit",
+      url: "https://myapp.test/tasks",
+    });
+
+    assertDeepEqual(visits, [{ url: "https://myapp.test/tasks", action: "replace" }]);
+  });
+});

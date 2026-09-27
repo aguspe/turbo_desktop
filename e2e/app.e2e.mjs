@@ -376,6 +376,57 @@ test("closeModal() closes the window the page is in", async () => {
   assert.equal(await path(), "/");
 });
 
+test("saving a form in a modal closes it and shows the result underneath", async () => {
+  await startOver();
+  await click("to-tasks");
+  await waitFor(async () => (await path()) === "/tasks", { label: "the tasks page" });
+  const before = await (await browser.$("#count")).getText();
+
+  await click("to-new-task");
+  await browser.switchToWindow(await otherWindow());
+  await waitFor(bridgeReady, { label: "the bridge in the modal" });
+  await (await browser.$("#title")).setValue("Record the demo");
+  // The window closes under the click, so the click itself may not return.
+  await (await browser.$("#save")).click().catch(() => {});
+
+  await onlyMainIsOpen();
+  await waitFor(async () => (await (await browser.$("#count")).getText()) !== before, {
+    label: "the window underneath to show what was saved",
+  });
+  assert.equal(await path(), "/tasks");
+  assert.equal((await windows()).length, 1);
+});
+
+test("leaving a modal by a link to an ordinary page closes it", async () => {
+  await startOver();
+  await click("to-new-task");
+  await browser.switchToWindow(await otherWindow());
+  await waitFor(bridgeReady, { label: "the bridge in the modal" });
+
+  await (await browser.$("#cancel")).click().catch(() => {});
+
+  await onlyMainIsOpen();
+  await waitFor(async () => (await path()) === "/tasks", {
+    label: "the window underneath to go where the modal was heading",
+  });
+});
+
+test("the Dev Inspector is still there after moving to another page", async () => {
+  await startOver();
+  await waitFor(
+    () => browser.execute(() => Boolean(document.querySelector("[data-turbo-desktop-inspector]"))),
+    { label: "the inspector to mount" }
+  );
+
+  await click("to-tasks");
+  await waitFor(async () => (await path()) === "/tasks", { label: "the tasks page" });
+
+  assert.equal(
+    await browser.execute(() => document.querySelectorAll("[data-turbo-desktop-inspector]").length),
+    1
+  );
+});
+
 test("a new_window rule opens a window of its own", async () => {
   await startOver();
 
