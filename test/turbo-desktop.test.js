@@ -84,7 +84,11 @@ describe("TurboDesktop initialization", () => {
   it("sets version, platform, and isNative", () => {
     const { window } = createEnvironment();
     assert.strictEqual(window.TurboDesktop.version, packageVersion);
-    assert.strictEqual(window.TurboDesktop.platform, "macos");
+    // Whichever machine runs this: the platform is read, not written in.
+    assert.ok(
+      ["macos", "windows", "linux"].includes(window.TurboDesktop.platform),
+      `unexpected platform ${window.TurboDesktop.platform}`
+    );
     assert.strictEqual(window.TurboDesktop.isNative, true);
   });
 
