@@ -70,11 +70,25 @@ changed in the shell:
   `"macos"` everywhere.
 - `turbo-desktop-bridge` works from TypeScript, under `bundler` and `nodenext`
   resolution, and can be imported before the shell has injected.
+- A link followed or a file opened while the app is running reaches it, on
+  Windows and Linux. Each started a second copy of the app, with a window of
+  its own, and the one already open heard nothing.
+- Quitting the app stops the server on Windows. The shell stopped `cmd`, and
+  the server `cmd` had started kept running, and kept the port.
+- An app reports the platform it is running on to Rails. A new app's
+  configuration carried the user agent of the machine it was scaffolded on,
+  so one made on a Mac said macOS when it ran on Windows.
+- A configuration saved with a byte order mark is read. Notepad and Windows
+  PowerShell save one, and the app refused to start.
+- `TurboDesktop.fs.read(path, "base64")` reads a file that is not text. The
+  encoding was ignored, and such a file could not be read at all.
 
 ### Changed
 
 - The TypeScript definitions declare the whole runtime API.
 - The README's quick start mounts the engine, and lists every bridge component.
+- The README says where a component differs between platforms, and that a
+  dropped or opened path is granted for writing as well as reading.
 
 ## 0.2.3 (2026-09-27)
 

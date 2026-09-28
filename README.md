@@ -48,11 +48,20 @@ Here's what a Rails app looks like running inside Turbo Desktop (from the [examp
   <img src="docs/screenshots/dashboard.png" alt="Dashboard — desktop features banner, stats, recent tasks" width="700" />
 </p>
 
+The same app, from the same Rails code, on the three platforms:
+
+| macOS | Windows | Linux |
+|---|---|---|
+| <img src="docs/screenshots/macos.png" alt="The Task Manager on macOS" width="280" /> | <img src="docs/screenshots/windows.png" alt="The Task Manager on Windows 11" width="280" /> | <img src="docs/screenshots/linux.png" alt="The Task Manager on Ubuntu" width="280" /> |
+
+The badge in the corner of each is what Rails was told: `turbo_desktop_platform`,
+`turbo_desktop_arch`, and the shell's version.
+
 ## Features
 
 - **No new UI framework** — your existing Rails views, Turbo Frames, and Stimulus controllers just work
 - **Native when you need it** — notifications, file pickers, menus, and keyboard shortcuts via Bridge Components
-- **Tiny binary** — Tauri uses the OS WebView, no bundled Chromium. Ship a ~5-10 MB app
+- **Small installers** — Tauri uses the OS WebView, no bundled Chromium. The shell's own installers are 5 to 15 MB
 - **Path configuration** — JSON-based routing rules (same concept as turbo-ios / turbo-android)
 - **Bridge components** — web-to-native communication via Stimulus controllers
 - **Rails gem** — `turbo_desktop-rails` gives your Rails app desktop shell awareness
@@ -188,8 +197,9 @@ first:
 }
 ```
 
-- `command` runs through your login shell on macOS and Linux, so a Ruby version
-  manager (rbenv, asdf, mise) is set up the same way it would be in a terminal.
+- `command` runs through your shell on macOS and Linux, started as a login and
+  interactive one, so a Ruby version manager (rbenv, asdf, mise) is set up the
+  same way it would be in a terminal.
   On Windows it runs through `cmd`, and the Unix `bin/rails` binstub does not
   apply — set `command` to `ruby bin\rails server` there.
 - `directory` is resolved relative to the config file and defaults to `..` —
@@ -336,9 +346,23 @@ TurboDesktop.sendBridgeMessage("notification", "show", {
 })
 ```
 
-Each has a JavaScript API on `TurboDesktop` (`TurboDesktop.fs`, `.shell`,
-`.clipboard`, and so on), typed in `src/turbo-desktop.d.ts` and in the
+`filesystem`, `shell`, `sudo`, `clipboard`, `autostart`, `updater`, `dialog` and
+`devtools` have a JavaScript API of their own on `TurboDesktop`
+(`TurboDesktop.fs`, `.shell`, `.clipboard`, and so on). The others are reached
+with `sendBridgeMessage`, from markup with `turbo_desktop_bridge`, or arrive as
+DOM events. All of it is typed in `src/turbo-desktop.d.ts` and in the
 [`turbo-desktop-bridge`](packages/bridge) npm package.
+
+#### What differs between platforms
+
+| Component | Where it differs |
+|---|---|
+| `badge` | macOS and Linux. Windows has no badge count on a taskbar icon, and the component answers `unavailable` or does nothing there. |
+| `shortcut` | On Linux, under X11 only. Under Wayland a global shortcut cannot be registered and the component answers `unavailable`. |
+| `shell` | Through a login shell on macOS and Linux, through `cmd` on Windows. |
+| `sudo` | On Windows the output of an elevated command arrives when it has finished, not line by line. |
+| `updater` | Off until the app names its update server: see [Distribution](docs/DISTRIBUTION.md#auto-update-optional). |
+| Tray icon | Stock GNOME shows no tray icons without an extension. |
 
 ### Modal and secondary windows
 
@@ -500,6 +524,10 @@ reach the shell.
 The shell watches your server and reports failures using the same vocabulary as
 Hotwire Native, so `network_failure`, `timeout_failure`, `http_failure` and
 `page_load_failure` mean here what they mean on turbo-ios and turbo-android.
+The shell reports two of them today, `network_failure` and `http_failure`: a
+server that does not answer in time is reported as a `network_failure`. The
+other two names are kept so that an app written against them goes on working
+when the shell tells them apart.
 
 **What happens by default.** If your server is unreachable at launch, the window
 opens on a bundled error page. If it goes away while the app is running, a
@@ -542,8 +570,7 @@ reported.
 
 ### Bridge security
 
-The bridge reaches the shell, the filesystem and (on macOS) administrator
-privileges, so it is closed by default and opened deliberately.
+The bridge reaches the shell, the filesystem and administrator privileges, so it is closed by default and opened deliberately.
 
 **Origin.** Every bridge message is checked against `server_url` before it is
 dispatched. Only pages served from that origin can use the bridge.
@@ -622,7 +649,10 @@ No answer is a no: if the shell cannot ask, nothing goes ahead.
 Files dragged from the Finder or Explorer onto any app window reach your page
 with their real paths — something a browser never gives you. The drop counts as
 consent, like a dialog pick: the dropped files (and folders, with their
-contents) become readable through the filesystem bridge for the session.
+contents) can be reached through the filesystem bridge for the session. That
+is reading and writing both, and for a folder removing what is in it: a grant
+is for the path, not for one thing done to it. The protected locations stay
+refused.
 
 Subscribe from a Stimulus controller with plain DOM events:
 
@@ -695,8 +725,12 @@ once, and is never taken for a link to a page.
 Opened files arrive as a `turbo-desktop:file-open` DOM event with
 `event.detail.paths`, whether the app was already running or was launched by
 the double-click — a launch queues the paths until your page is up. Like a
-dialog pick, being asked to open a file grants it for reading through the
-filesystem bridge.
+dialog pick, being asked to open a file grants it through the filesystem
+bridge, for reading and for writing.
+
+On Windows and Linux a file opened while the app is running starts the app a
+second time; that copy hands the file to the one already open and leaves, so
+there is one window either way. Links arrive the same way.
 
 ```js
 // data-action="turbo-desktop:file-open@document->importer#fileOpened"
@@ -710,11 +744,14 @@ async fileOpened(event) {
 In development, press **Cmd/Ctrl+Shift+D** to open the Dev Inspector — an in-app
 overlay that shows:
 
-- **Components** — every available bridge component, with a copy-pasteable
-  Rails + Stimulus snippet, and which are active on the current page
-- **Messages** — a live log of web↔native bridge traffic
-- **Navigation** — the path-configuration presentation applied to the current URL
-- **Shell** — platform, arch, version, and server URL
+- **Components** — the bridge components it knows, and how many messages each
+  has sent since the inspector was opened
+- **Messages** — a live log of what the page sends to the shell
+- **Navigation** — the presentation the path configuration gave the last visit
+- **Shell** — platform, arch and version
+
+It does not list every component yet: `clipboard`, `autostart`, `file-open`,
+`dialog` and `devtools` are missing from it.
 
 Enable it from the Rails gem (added by the installer in development):
 
@@ -818,9 +855,9 @@ The `turbo_desktop-rails` gem gives your Rails app awareness of the desktop shel
 | Shell runtime | WKWebView (Swift) | WebView (Kotlin) | Tauri WebView (Rust) |
 | Path configuration | JSON, last-match-wins | JSON, last-match-wins | JSON, last-match-wins |
 | Bridge / native comms | Strada | Strada | BridgeComponent |
-| JS injection | WKUserScript | evaluateJavascript | on_page_load + eval |
+| JS injection | WKUserScript | evaluateJavascript | initialization script |
 | Rails gem | turbo-rails | turbo-rails | turbo_desktop-rails |
-| Binary size | System WebKit | ~20 MB | ~5-10 MB |
+| Installer size | System WebKit | ~20 MB | 5 to 15 MB |
 | Platforms | iOS, iPadOS | Android | macOS, Windows, Linux |
 
 ## Custom App Icon

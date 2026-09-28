@@ -42,8 +42,11 @@ Output: `src-tauri/target/release/bundle/`.
 ## Using this in your own app
 
 `npx turbo-desktop new myapp` scaffolds a `desktop/` project. To get the same one-tag releases,
-copy `release.yml` into your app's `.github/workflows/` and adjust `projectPath` if your Tauri
-project isn't at the repo root. Everything else (matrix, deps, draft release) works as-is.
+copy `release.yml` into your app's `.github/workflows/` and point it at `desktop/`, where the
+scaffold puts the Tauri project: add `projectPath: desktop` under the `tauri-action` step's
+`with:`, and run the Node steps there too (`working-directory: desktop`, and `npm install` in
+place of `npm ci` unless you commit a lockfile). The matrix, the system dependencies and the
+draft release work as they are.
 
 ## Signing & notarization (recommended before shipping to real users)
 
@@ -70,7 +73,8 @@ are **off** until you configure them:
 2. Put the public key in `tauri.conf.json` → `plugins.updater.pubkey` and add your update-server
    `endpoints`.
 3. Add the private key + password as the `TAURI_SIGNING_PRIVATE_KEY` /
-   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secrets (the release workflow already passes them through).
+   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secrets, and uncomment the two lines that pass them
+   through in `release.yml`.
 
 Details: [Tauri updater](https://tauri.app/plugin/updater/).
 
