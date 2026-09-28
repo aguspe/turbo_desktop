@@ -122,8 +122,7 @@ pub async fn start(
                 }
                 request = &mut kill_rx => {
                     log::info!("Stopping the app server");
-                    let _ = child.kill().await;
-                    let _ = child.wait().await;
+                    crate::process_manager::stop_tree(&mut child).await;
                     if let Ok(request) = request {
                         request.stopped();
                     }

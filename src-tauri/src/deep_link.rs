@@ -196,6 +196,14 @@ pub fn handle_files(app: &tauri::AppHandle, paths: Vec<std::path::PathBuf>) {
     // yet misses the ping and drains on its own startup instead.
     if let Some(window) = app.get_webview_window("main") {
         crate::window::deliver_to_page(&window, "file-open-pending", &serde_json::json!({}));
+    }
+    bring_forward(app);
+}
+
+/// Put the app's window in front: someone asked for the app.
+pub fn bring_forward(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
     }
@@ -222,9 +230,50 @@ pub fn paths_from_args<I: Iterator<Item = String>>(args: I) -> Vec<std::path::Pa
         .collect()
 }
 
+/// The same, for a launch from somewhere else: a path that is not absolute is
+/// taken from the directory the launch was made in, which for a second copy
+/// of the app is not the directory this one is running in.
+pub fn paths_from_launch<I: Iterator<Item = String>>(
+    args: I,
+    directory: &std::path::Path,
+) -> Vec<std::path::PathBuf> {
+    args.skip(1)
+        .filter(|arg| !arg.starts_with('-'))
+        .map(|arg| directory.join(arg))
+        .filter(|path| path.exists())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // A second copy of the app is started wherever the person was, and hands
+    // its arguments to the first, which is running somewhere else.
+    #[test]
+    fn a_file_named_from_another_directory_is_found_there() {
+        let directory = std::env::temp_dir().join(format!("td-launch-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let file = directory.join("tasks.csv");
+        std::fs::write(&file, "title\n").unwrap();
+
+        let args = vec![
+            "turbo-desktop".to_string(),
+            "--flag".to_string(),
+            "tasks.csv".to_string(),
+            "missing.csv".to_string(),
+            "task-manager://orders/1".to_string(),
+        ];
+        assert_eq!(paths_from_launch(args.into_iter(), &directory), vec![file.clone()]);
+
+        let absolute = vec!["turbo-desktop".to_string(), file.to_string_lossy().into_owned()];
+        assert_eq!(
+            paths_from_launch(absolute.into_iter(), std::path::Path::new("/nowhere")),
+            vec![file]
+        );
+
+        let _ = std::fs::remove_dir_all(&directory);
+    }
 
     // macOS tells the app about an opened file twice over: as a file to
     // open, and as a URL. It is one file, opened once.

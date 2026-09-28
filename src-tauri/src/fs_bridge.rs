@@ -65,10 +65,36 @@ async fn handle_read(
     scope: &FsScope<'_>,
 ) -> Result<serde_json::Value, String> {
     let path = scoped_path(message, scope, "read")?;
+    let encoding = message.data["encoding"].as_str().unwrap_or("utf8");
 
-    match fs::read_to_string(&path).await {
-        Ok(content) => Ok(serde_json::json!({ "status": "ok", "content": content })),
+    match fs::read(&path).await {
+        Ok(bytes) => Ok(read_response(bytes, encoding)),
         Err(e) => Ok(serde_json::json!({ "status": "error", "error": e.to_string() })),
+    }
+}
+
+/// What a read answers with: the text of the file, or for `base64` its bytes,
+/// which is how a page reads a file that is not text.
+fn read_response(bytes: Vec<u8>, encoding: &str) -> serde_json::Value {
+    use base64::Engine;
+
+    match encoding {
+        "base64" => serde_json::json!({
+            "status": "ok",
+            "encoding": "base64",
+            "content": base64::engine::general_purpose::STANDARD.encode(bytes),
+        }),
+        "utf8" | "utf-8" => match String::from_utf8(bytes) {
+            Ok(content) => serde_json::json!({ "status": "ok", "encoding": "utf8", "content": content }),
+            Err(_) => serde_json::json!({
+                "status": "error",
+                "error": "The file is not text. Read it with the encoding \"base64\".",
+            }),
+        },
+        other => serde_json::json!({
+            "status": "error",
+            "error": format!("Unknown encoding '{}': use \"utf8\" or \"base64\"", other),
+        }),
     }
 }
 
@@ -180,5 +206,38 @@ async fn handle_remove(
     match result {
         Ok(()) => Ok(serde_json::json!({ "status": "ok" })),
         Err(e) => Ok(serde_json::json!({ "status": "error", "error": e.to_string() })),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn text_is_read_as_text() {
+        let response = read_response("título\n".as_bytes().to_vec(), "utf8");
+        assert_eq!(response["status"], "ok");
+        assert_eq!(response["content"], "título\n");
+    }
+
+    // A PNG, a PDF, a spreadsheet: asked for as base64, the bytes arrive whole.
+    #[test]
+    fn a_file_that_is_not_text_is_read_as_base64() {
+        let png = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff];
+
+        let response = read_response(png.clone(), "base64");
+        assert_eq!(response["status"], "ok");
+        assert_eq!(response["encoding"], "base64");
+        assert_eq!(response["content"], "iVBORw0KGgoA/w==");
+
+        let as_text = read_response(png, "utf8");
+        assert_eq!(as_text["status"], "error");
+        assert!(as_text["error"].as_str().unwrap().contains("base64"));
+    }
+
+    #[test]
+    fn an_encoding_nobody_knows_is_refused() {
+        let response = read_response(b"x".to_vec(), "latin1");
+        assert_eq!(response["status"], "error");
     }
 }

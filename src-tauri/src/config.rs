@@ -173,7 +173,8 @@ pub fn load_from_file(path: &Path) -> Result<PathConfiguration, String> {
     let contents = std::fs::read_to_string(path)
         .map_err(|e| format!("Could not read {}: {}", path.display(), e))?;
 
-    serde_json::from_str(&contents).map_err(|e| format!("{} is not valid: {}", path.display(), e))
+    serde_json::from_str(crate::window::without_byte_order_mark(&contents))
+        .map_err(|e| format!("{} is not valid: {}", path.display(), e))
 }
 
 /// Rules to start with, before the server has been asked.

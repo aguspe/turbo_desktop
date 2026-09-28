@@ -41,6 +41,30 @@ impl StopRequest {
     }
 }
 
+/// Stop a process and what it started.
+///
+/// A command runs through a shell, so the process held here is the shell and
+/// the work is done by its child. On Windows stopping `cmd` leaves that child
+/// running: a Rails server started by the app kept the port after the app had
+/// quit. `taskkill /T` takes the whole tree.
+pub async fn stop_tree(child: &mut tokio::process::Child) {
+    #[cfg(windows)]
+    if let Some(pid) = child.id() {
+        // CREATE_NO_WINDOW: no console flashes up as the app closes.
+        let stopped = tokio::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .creation_flags(0x0800_0000)
+            .output()
+            .await;
+        if let Err(e) = stopped {
+            log::warn!("Could not stop the processes started by {}: {}", pid, e);
+        }
+    }
+
+    let _ = child.kill().await;
+    let _ = child.wait().await;
+}
+
 /// How long quitting waits for the processes to stop before leaving anyway.
 pub const STOP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
@@ -204,6 +228,76 @@ impl ProcessManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    fn is_running(pid: u32) -> bool {
+        let listed = std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {}", pid), "/NH", "/FO", "CSV"])
+            .output()
+            .expect("tasklist should run");
+        String::from_utf8_lossy(&listed.stdout).contains(&format!("\"{}\"", pid))
+    }
+
+    #[cfg(windows)]
+    fn started_by(pid: u32) -> Vec<u32> {
+        let listed = std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                &format!(
+                    "(Get-CimInstance Win32_Process -Filter 'ParentProcessId={}').ProcessId",
+                    pid
+                ),
+            ])
+            .output()
+            .expect("powershell should run");
+        String::from_utf8_lossy(&listed.stdout)
+            .split_whitespace()
+            .filter_map(|id| id.parse().ok())
+            .collect()
+    }
+
+    // The server is started through `cmd`, and is cmd's child. Stopping cmd
+    // alone left it running, holding the port.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn stopping_a_command_stops_what_it_started() {
+        let mut shell = tokio::process::Command::new("cmd")
+            .args(["/C", "ping -n 60 127.0.0.1 >NUL"])
+            .spawn()
+            .expect("cmd should start");
+        let shell_pid = shell.id().expect("a running process has an id");
+
+        let mut children = Vec::new();
+        for _ in 0..50 {
+            children = started_by(shell_pid);
+            if !children.is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        assert!(!children.is_empty(), "cmd should have started ping");
+
+        stop_tree(&mut shell).await;
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        for child in children {
+            assert!(!is_running(child), "process {} outlived the command that started it", child);
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stopping_a_command_stops_it() {
+        let mut child = tokio::process::Command::new("sleep")
+            .arg("60")
+            .spawn()
+            .expect("sleep should start");
+
+        stop_tree(&mut child).await;
+
+        assert!(child.try_wait().expect("the process was waited for").is_some());
+    }
 
     async fn register(pm: &ProcessManager, id: &str) -> Result<(), String> {
         let (tx, rx) = tokio::sync::oneshot::channel::<StopRequest>();

@@ -195,7 +195,13 @@ fn default_config() -> TurboDesktopConfig {
 }
 
 pub fn parse_config(contents: &str) -> Result<TurboDesktopConfig, String> {
-    serde_json::from_str(contents).map_err(|e| e.to_string())
+    serde_json::from_str(without_byte_order_mark(contents)).map_err(|e| e.to_string())
+}
+
+/// A file saved by Notepad or by Windows PowerShell begins with a byte order
+/// mark, which is not JSON. The file is the same file without it.
+pub fn without_byte_order_mark(contents: &str) -> &str {
+    contents.strip_prefix('\u{feff}').unwrap_or(contents)
 }
 
 /// A loaded configuration and where it came from.
@@ -410,7 +416,7 @@ pub fn load_preferences(dir: Option<&Path>) -> Preferences {
         return Preferences::default();
     };
 
-    match serde_json::from_str(&contents) {
+    match serde_json::from_str(without_byte_order_mark(&contents)) {
         Ok(preferences) => preferences,
         Err(e) => {
             log::warn!("Ignoring unreadable {}: {}", path.display(), e);
@@ -433,6 +439,13 @@ pub fn save_preferences(dir: &Path, preferences: &Preferences) -> Result<(), Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Notepad and Windows PowerShell both save one at the head of the file.
+    #[test]
+    fn a_config_saved_with_a_byte_order_mark_is_read() {
+        let config = parse_config("\u{feff}{\"server_url\":\"https://app.example.com\"}").unwrap();
+        assert_eq!(config.server_url, "https://app.example.com");
+    }
 
     fn scratch(name: &str) -> PathBuf {
         let dir = crate::test_temp_dir().join(format!("turbo-desktop-config-{name}"));

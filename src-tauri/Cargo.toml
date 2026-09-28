@@ -28,6 +28,12 @@ tauri-plugin-deep-link = "2.4.9"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-global-shortcut = "2"
+base64 = "0.22"
+
+# macOS hands a link or a file to the running app by itself. Elsewhere a second
+# copy of the app is started with it, and has to pass it on.
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 cocoa = "0.26"

@@ -90,7 +90,7 @@ async fn handle_spawn(
         .register(id.clone(), command.clone(), args.clone(), kill_tx)
         .await
     {
-        let _ = child.kill().await;
+        crate::process_manager::stop_tree(&mut child).await;
         log::warn!("Shell: {}", e);
         return Err(e);
     }
@@ -151,8 +151,7 @@ async fn stream_process(
                 }
             }
             request = &mut kill_rx => {
-                let _ = child.kill().await;
-                let _ = child.wait().await;
+                crate::process_manager::stop_tree(&mut child).await;
                 emit_shell_event(&app, &id, "exit", serde_json::json!({ "id": id, "code": null }));
                 let pm = app.state::<ProcessManager>();
                 pm.mark_exited(&id, None).await;

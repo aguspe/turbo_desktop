@@ -55,7 +55,24 @@ const LOAD_THE_INSPECTOR: &str = r#"(function () {
 fn main() {
     env_logger::init();
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+
+    // A link followed, or a file opened, while the app is running starts the
+    // app a second time on Windows and Linux. That copy hands over what it
+    // was started with and leaves; this is the one that receives it. Links
+    // go on to the deep link handler; files are taken from the arguments.
+    // Registered before anything else, so the second copy gets no further.
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+        let files = deep_link::paths_from_launch(args.into_iter(), std::path::Path::new(&cwd));
+        if files.is_empty() {
+            deep_link::bring_forward(app);
+        } else {
+            deep_link::handle_files(app, files);
+        }
+    }));
+
+    builder
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
@@ -300,7 +317,13 @@ fn main() {
             // type. Windows and Linux pass them as launch arguments; macOS
             // raises RunEvent::Opened instead, handled in run() below.
             #[cfg(not(target_os = "macos"))]
-            deep_link::handle_files(&app_handle, deep_link::paths_from_args(std::env::args()));
+            deep_link::handle_files(
+                &app_handle,
+                deep_link::paths_from_launch(
+                    std::env::args(),
+                    &std::env::current_dir().unwrap_or_default(),
+                ),
+            );
 
             // Set up the system tray icon
             if let Err(e) = tray::setup_tray(&app_handle) {
@@ -340,8 +363,8 @@ fn main() {
             }
 
             // macOS delivers associated files as an event — at launch or into
-            // the running app. Other platforms pass them as arguments instead,
-            // handled at setup.
+            // the running app. Other platforms pass them as arguments instead:
+            // to this process at setup, or to a second one that hands them on.
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Opened { urls } = &event {
                 let files: Vec<std::path::PathBuf> = urls

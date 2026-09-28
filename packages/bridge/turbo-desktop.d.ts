@@ -367,11 +367,19 @@ export interface TurboDesktopAPI {
 
   /** File system API for reading and writing files. Supports ~/ expansion. */
   fs: {
-    /** Read a file's contents as a string. */
+    /**
+     * Read a file: its text, or with `"base64"` its bytes, which is how to
+     * read a file that is not text.
+     */
     read(
       path: string,
       encoding?: "utf8" | "base64"
-    ): Promise<{ status: string; content?: string; error?: string } | null>;
+    ): Promise<{
+      status: string;
+      content?: string;
+      encoding?: "utf8" | "base64";
+      error?: string;
+    } | null>;
 
     /** Write content to a file. Use `append: true` to append instead of overwrite. */
     write(
