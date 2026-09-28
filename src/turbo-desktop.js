@@ -1009,7 +1009,18 @@
     }
   }
 
-  drainOpenedFiles();
+  // Once the page has loaded, and not before: the file is handed over once,
+  // and the page's own scripts have to be listening when it is. They connect
+  // when the document is ready, after this script, which was there first.
+  function whenThePageHasLoaded(callback) {
+    if (document.readyState === "complete") {
+      callback();
+    } else {
+      window.addEventListener("load", callback, { once: true });
+    }
+  }
+
+  whenThePageHasLoaded(drainOpenedFiles);
 
   // ─── A link from outside ───────────────────────────────────────────────────
   //

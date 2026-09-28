@@ -1724,3 +1724,67 @@ describe("asking before something is done", () => {
     assert.equal(window.Turbo.config.forms.confirm, own);
   });
 });
+
+describe("a file that started the app, and the page that is to receive it", () => {
+  // The bridge is there before the page's scripts. What the page is to be
+  // told has to wait until the page is listening, which is once its own
+  // scripts have run: a Stimulus controller connects when the document is
+  // ready, after anything that was waiting for that before it.
+  async function pageThatListensLate() {
+    const dom = new JSDOM(`<!DOCTYPE html><html><head></head><body></body></html>`, {
+      url: "http://localhost:3000/",
+      runScripts: "dangerously",
+    });
+    const { window } = dom;
+    await tick();
+
+    let loaded = false;
+    Object.defineProperty(window.document, "readyState", {
+      get: () => (loaded ? "complete" : "loading"),
+      configurable: true,
+    });
+    window.__TURBO_DESKTOP_SERVER_URL__ = "http://localhost:3000";
+    let pending = ["/Users/someone/Desktop/tasks.csv"];
+    window.__TAURI_INTERNALS__ = {
+      invoke: async (cmd, args) => {
+        if (cmd !== "handle_bridge_message") return undefined;
+        if (args.message.component === "file-open") {
+          const paths = pending;
+          pending = [];
+          return { status: "ok", paths };
+        }
+        return { status: "ok" };
+      },
+    };
+
+    window.eval(scriptSource);
+
+    const received = [];
+    // The app's controller, connecting when the document is ready.
+    window.document.addEventListener("DOMContentLoaded", () => {
+      window.document.addEventListener("turbo-desktop:file-open", (event) =>
+        received.push(event.detail.paths)
+      );
+    });
+
+    return {
+      received,
+      async finishLoading() {
+        window.document.dispatchEvent(new window.Event("DOMContentLoaded"));
+        loaded = true;
+        window.dispatchEvent(new window.Event("load"));
+        await tick();
+        await tick();
+      },
+    };
+  }
+
+  it("is handed over once the page is listening", async () => {
+    const { received, finishLoading } = await pageThatListensLate();
+    await tick();
+
+    await finishLoading();
+
+    assertDeepEqual(received, [["/Users/someone/Desktop/tasks.csv"]]);
+  });
+});
