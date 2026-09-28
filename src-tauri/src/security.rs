@@ -50,9 +50,44 @@ pub fn is_trusted_origin(server_url: &str, candidate: &Url) -> bool {
 pub fn is_bundled_app_origin(candidate: &Url) -> bool {
     match candidate.scheme() {
         "tauri" => true,
-        "http" | "https" => candidate.host_str() == Some("tauri.localhost"),
+        "http" | "https" => {
+            candidate.host_str() == Some("tauri.localhost")
+                || is_development_origin(development_origin(), candidate)
+        }
         _ => false,
     }
+}
+
+/// Where `tauri dev` serves the bundled pages from, when running under it.
+///
+/// A shipped app loads its pages from `tauri://localhost`. In development
+/// Tauri serves the same files over HTTP from an address of its own, and
+/// those pages have to be recognised as ours there too: otherwise the shell
+/// takes its own error page for an external link and hands it to the browser.
+static DEVELOPMENT_ORIGIN: std::sync::OnceLock<Url> = std::sync::OnceLock::new();
+
+/// Record the development server's address. Called once at startup, and only
+/// by a development build: a shipped app never trusts an HTTP origin this way.
+pub fn trust_development_origin(dev_url: &Url) {
+    if cfg!(debug_assertions) {
+        let _ = DEVELOPMENT_ORIGIN.set(dev_url.clone());
+    }
+}
+
+fn development_origin() -> Option<&'static Url> {
+    DEVELOPMENT_ORIGIN.get()
+}
+
+/// True when `candidate` is served from the development server: the same
+/// scheme, host and port, and nothing looser.
+pub fn is_development_origin(dev_url: Option<&Url>, candidate: &Url) -> bool {
+    let Some(dev) = dev_url else {
+        return false;
+    };
+
+    candidate.scheme() == dev.scheme()
+        && candidate.host_str() == dev.host_str()
+        && candidate.port_or_known_default() == dev.port_or_known_default()
 }
 
 /// Reject a command call coming from any page that is not the app origin.
@@ -427,6 +462,31 @@ mod tests {
         assert!(is_bundled_app_origin(&url("http://tauri.localhost/index.html")));
     }
 
+    // `tauri dev` serves the bundled pages over HTTP from an address of its
+    // own. Unrecognised, the shell took its own error page for an external
+    // link and opened it in the browser.
+    #[test]
+    fn bundled_pages_are_trusted_where_development_serves_them() {
+        let dev = url("http://127.0.0.1:1430/");
+
+        assert!(is_development_origin(Some(&dev), &url("http://127.0.0.1:1430/error.html?error=network_failure")));
+    }
+
+    #[test]
+    fn only_that_exact_origin_counts_as_development() {
+        let dev = url("http://127.0.0.1:1430/");
+
+        assert!(!is_development_origin(Some(&dev), &url("http://127.0.0.1:1431/error.html")));
+        assert!(!is_development_origin(Some(&dev), &url("https://127.0.0.1:1430/error.html")));
+        assert!(!is_development_origin(Some(&dev), &url("http://localhost:1430/error.html")));
+        assert!(!is_development_origin(Some(&dev), &url("https://evil.example.com/")));
+    }
+
+    #[test]
+    fn a_shipped_app_has_no_development_origin() {
+        assert!(!is_development_origin(None, &url("http://127.0.0.1:1430/error.html")));
+    }
+
     #[test]
     fn remote_pages_are_not_bundled_pages() {
         assert!(!is_bundled_app_origin(&url("https://evil.example.com/")));
@@ -526,7 +586,7 @@ mod tests {
 
     #[test]
     fn resolves_paths_inside_an_allowed_root() {
-        let dir = std::env::temp_dir().join("turbo-desktop-scope-ok");
+        let dir = crate::test_temp_dir().join("turbo-desktop-scope-ok");
         std::fs::create_dir_all(&dir).unwrap();
         let root = dir.canonicalize().unwrap();
 
@@ -539,7 +599,7 @@ mod tests {
 
     #[test]
     fn rejects_traversal_out_of_the_root() {
-        let dir = std::env::temp_dir().join("turbo-desktop-scope-traversal");
+        let dir = crate::test_temp_dir().join("turbo-desktop-scope-traversal");
         std::fs::create_dir_all(&dir).unwrap();
         let root = dir.canonicalize().unwrap();
 
@@ -553,7 +613,7 @@ mod tests {
 
     #[test]
     fn rejects_protected_locations_inside_a_root() {
-        let dir = std::env::temp_dir().join("turbo-desktop-scope-denied");
+        let dir = crate::test_temp_dir().join("turbo-desktop-scope-denied");
         std::fs::create_dir_all(&dir).unwrap();
         let root = dir.canonicalize().unwrap();
 
@@ -582,7 +642,7 @@ mod tests {
 
     #[test]
     fn a_dialog_picked_file_is_reachable_outside_the_roots() {
-        let dir = std::env::temp_dir().join("turbo-desktop-grant-file");
+        let dir = crate::test_temp_dir().join("turbo-desktop-grant-file");
         std::fs::create_dir_all(&dir).unwrap();
         let picked = dir.canonicalize().unwrap().join("report.csv");
 
@@ -606,7 +666,7 @@ mod tests {
 
     #[test]
     fn a_dialog_picked_folder_covers_its_subtree() {
-        let dir = std::env::temp_dir().join("turbo-desktop-grant-folder");
+        let dir = crate::test_temp_dir().join("turbo-desktop-grant-folder");
         std::fs::create_dir_all(&dir).unwrap();
         let folder = dir.canonicalize().unwrap();
 
@@ -623,7 +683,7 @@ mod tests {
 
     #[test]
     fn a_grant_does_not_override_protected_locations() {
-        let dir = std::env::temp_dir().join("turbo-desktop-grant-denied");
+        let dir = crate::test_temp_dir().join("turbo-desktop-grant-denied");
         std::fs::create_dir_all(&dir).unwrap();
         let folder = dir.canonicalize().unwrap();
 
@@ -641,7 +701,7 @@ mod tests {
         // A granted path must match after normalization, so `root/../granted`
         // resolves to the grant itself and is allowed, while unrelated
         // traversal keeps failing.
-        let dir = std::env::temp_dir().join("turbo-desktop-grant-traversal");
+        let dir = crate::test_temp_dir().join("turbo-desktop-grant-traversal");
         std::fs::create_dir_all(&dir).unwrap();
         let picked = dir.canonicalize().unwrap().join("picked.txt");
 

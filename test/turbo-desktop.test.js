@@ -84,7 +84,11 @@ describe("TurboDesktop initialization", () => {
   it("sets version, platform, and isNative", () => {
     const { window } = createEnvironment();
     assert.strictEqual(window.TurboDesktop.version, packageVersion);
-    assert.strictEqual(window.TurboDesktop.platform, "macos");
+    // Whichever machine runs this: the platform is read, not written in.
+    assert.ok(
+      ["macos", "windows", "linux"].includes(window.TurboDesktop.platform),
+      `unexpected platform ${window.TurboDesktop.platform}`
+    );
     assert.strictEqual(window.TurboDesktop.isNative, true);
   });
 
@@ -826,5 +830,961 @@ describe("Returning to the window", () => {
     focusReturn(window, { awaySeconds: 3600, refreshing: true });
 
     assert.strictEqual(visits.length, 1);
+  });
+});
+
+// ─── Turbo Drive integration ──────────────────────────────────────────────
+
+describe("visits the shell presents itself", () => {
+  // Turbo reads defaultPrevented as soon as dispatchEvent returns. A decision
+  // that arrives after an await is a decision Turbo never sees.
+  function propose(window, url) {
+    const event = new window.CustomEvent("turbo:before-visit", {
+      detail: { url },
+      cancelable: true,
+      bubbles: true,
+    });
+    window.document.dispatchEvent(event);
+    return event;
+  }
+
+  function environment(decision) {
+    const visits = [];
+    const env = createEnvironment({
+      invoke: (cmd) => (cmd === "handle_visit_proposal" ? decision : undefined),
+    });
+    env.window.Turbo = { visit: (url, options) => visits.push({ url, ...options }) };
+    return { ...env, visits };
+  }
+
+  it("holds the visit while the shell decides", () => {
+    const { window } = environment({ action: "none", presentation: "modal" });
+
+    const event = propose(window, "https://myapp.test/tasks/new");
+
+    assert.equal(
+      event.defaultPrevented,
+      true,
+      "the main window would navigate to the URL the modal is about to show"
+    );
+  });
+
+  it("does not navigate the main window when the shell opens a modal", async () => {
+    const { window, visits } = environment({ action: "none", presentation: "modal" });
+
+    propose(window, "https://myapp.test/tasks/new");
+    await tick();
+
+    assertDeepEqual(visits, []);
+  });
+
+  it("carries on with an ordinary visit once the shell agrees", async () => {
+    const { window, visits } = environment({ action: "advance", presentation: "default" });
+
+    propose(window, "https://myapp.test/tasks");
+    await tick();
+
+    assertDeepEqual(visits, [{ url: "https://myapp.test/tasks", action: "advance" }]);
+  });
+
+  it("lets the visit it re-issued through, rather than proposing it again", async () => {
+    const { window, visits, calls } = environment({ action: "advance", presentation: "default" });
+
+    propose(window, "https://myapp.test/tasks");
+    await tick();
+    const second = propose(window, visits[0].url);
+    await tick();
+
+    assert.equal(second.defaultPrevented, false, "the approved visit was held a second time");
+    assert.equal(calls.filter((call) => call.cmd === "handle_visit_proposal").length, 1);
+    assert.equal(visits.length, 1, "the visit went round in a loop");
+  });
+
+  it("replaces instead of advancing when the rule says so, once", async () => {
+    const { window, visits, calls } = environment({ action: "replace", presentation: "replace" });
+
+    propose(window, "https://myapp.test/dashboard");
+    await tick();
+    propose(window, visits[0].url);
+    await tick();
+
+    assertDeepEqual(visits, [{ url: "https://myapp.test/dashboard", action: "replace" }]);
+    assert.equal(calls.filter((call) => call.cmd === "handle_visit_proposal").length, 1);
+  });
+
+  it("keeps the action a link asked for", async () => {
+    const { window, visits } = environment({ action: "advance", presentation: "default" });
+    const link = window.document.createElement("a");
+    link.href = "https://myapp.test/tasks?page=2";
+    link.dataset.turboAction = "replace";
+    window.document.body.appendChild(link);
+
+    link.dispatchEvent(
+      new window.CustomEvent("turbo:click", {
+        detail: { url: link.href },
+        bubbles: true,
+        cancelable: true,
+      })
+    );
+    propose(window, link.href);
+    await tick();
+
+    assertDeepEqual(visits, [{ url: "https://myapp.test/tasks?page=2", action: "replace" }]);
+  });
+
+  it("still navigates when the shell cannot be asked", async () => {
+    const visits = [];
+    const { window } = createEnvironment({
+      invoke: (cmd) => {
+        if (cmd === "handle_visit_proposal") throw new Error("the shell is gone");
+      },
+    });
+    window.Turbo = { visit: (url, options) => visits.push({ url, ...options }) };
+
+    propose(window, "https://myapp.test/tasks");
+    await tick();
+
+    assert.equal(visits.length, 1, "a failed proposal left the link doing nothing");
+  });
+
+  it("still navigates when the shell answers with nothing", async () => {
+    const { window, visits } = environment(null);
+
+    propose(window, "https://myapp.test/tasks");
+    await tick();
+
+    assertDeepEqual(visits, [{ url: "https://myapp.test/tasks", action: "advance" }]);
+  });
+});
+
+describe("stimulusBridge with more than one component", () => {
+  it("keeps each controller on its own component", async () => {
+    const { window, calls } = createEnvironment({ invoke: () => ({ ok: true }) });
+    class Base {
+      constructor(element) {
+        this.element = element;
+      }
+      connect() {}
+      disconnect() {}
+    }
+
+    const Notify = window.TurboDesktop.stimulusBridge(Base, "notification");
+    const Menu = window.TurboDesktop.stimulusBridge(Base, "menu-item");
+    const notify = new Notify(window.document.createElement("div"));
+    const menu = new Menu(window.document.createElement("div"));
+    notify.connect();
+    menu.connect();
+    calls.length = 0;
+
+    await notify.sendBridge("show", {});
+    await menu.sendBridge("register", {});
+
+    assertDeepEqual(
+      calls
+        .filter((call) => call.cmd === "handle_bridge_message")
+        .map((call) => call.args.message.component)
+        .filter((component) => ["notification", "menu-item"].includes(component)),
+      ["notification", "menu-item"]
+    );
+  });
+
+  it("leaves the base class's own component name alone", () => {
+    const { window } = createEnvironment({ invoke: () => ({ ok: true }) });
+    class Base {
+      constructor(element) {
+        this.element = element;
+      }
+      connect() {}
+    }
+
+    const Notify = window.TurboDesktop.stimulusBridge(Base, "notification");
+    new Notify(window.document.createElement("div")).connect();
+
+    assert.equal(window.TurboDesktop.BridgeComponent.component, "unknown");
+  });
+});
+
+describe("TurboDesktop.platform", () => {
+  function platformFor(userAgent) {
+    const dom = new JSDOM(`<!DOCTYPE html><html><head></head><body></body></html>`, {
+      url: "https://myapp.test/",
+      runScripts: "dangerously",
+    });
+    Object.defineProperty(dom.window.navigator, "userAgent", { value: userAgent });
+    dom.window.eval(scriptSource);
+    return dom.window.TurboDesktop.platform;
+  }
+
+  it("reports the platform the shell is running on", () => {
+    assert.equal(platformFor("Turbo Desktop/0.2.4 (macOS; aarch64)"), "macos");
+    assert.equal(platformFor("Turbo Desktop/0.2.4 (Windows; x86_64)"), "windows");
+    assert.equal(platformFor("Turbo Desktop/0.2.4 (Linux; x86_64)"), "linux");
+  });
+
+  it("reads it past a custom user agent that keeps the token", () => {
+    assert.equal(platformFor("MyApp/3.1 Turbo Desktop/0.2.4 (Linux; aarch64)"), "linux");
+  });
+});
+
+describe("the offline banner", () => {
+  const BANNER = "turbo-desktop-offline-overlay";
+
+  function fire(window, name, detail) {
+    window.document.dispatchEvent(new window.CustomEvent(name, { detail, cancelable: true }));
+  }
+
+  it("goes away when the next request succeeds", () => {
+    const { window } = createEnvironment({ invoke: () => undefined });
+
+    fire(window, "turbo:fetch-request-error", { url: "https://myapp.test/tasks" });
+    assert.ok(window.document.getElementById(BANNER), "test setup: the banner never appeared");
+
+    // One failed request, and the server is fine. Nothing else would take the
+    // banner down: the shell only reports the connection changing, and it
+    // has not changed.
+    fire(window, "turbo:before-fetch-response", {
+      fetchResponse: { succeeded: true, statusCode: 200 },
+    });
+
+    assert.equal(window.document.getElementById(BANNER), null);
+  });
+
+  it("stays while requests keep failing", () => {
+    const { window } = createEnvironment({ invoke: () => undefined });
+
+    fire(window, "turbo:fetch-request-error", { url: "https://myapp.test/tasks" });
+    fire(window, "turbo:before-fetch-response", {
+      fetchResponse: { succeeded: false, statusCode: 503 },
+    });
+
+    assert.ok(window.document.getElementById(BANNER));
+  });
+
+  it("goes away when the server answers with an error page of its own", () => {
+    const { window } = createEnvironment({ invoke: () => undefined });
+
+    fire(window, "turbo:fetch-request-error", { url: "https://myapp.test/tasks" });
+    fire(window, "turbo:before-fetch-response", {
+      fetchResponse: { succeeded: false, statusCode: 422 },
+    });
+
+    assert.equal(
+      window.document.getElementById(BANNER),
+      null,
+      "a 422 is the server answering; it is reachable"
+    );
+  });
+});
+
+describe("listening to a process's output twice", () => {
+  for (const namespace of ["shell", "sudo"]) {
+    it(`${namespace}.onOutput replaces the earlier listener for that process`, () => {
+      const { window } = createEnvironment();
+      const td = window.TurboDesktop;
+      const seen = [];
+
+      // What a Stimulus controller does when Turbo brings its page back.
+      td[namespace].onOutput("job-1", (message) => seen.push(["first", message.line]));
+      td[namespace].onOutput("job-1", (message) => seen.push(["second", message.line]));
+      td.__receive("bridge-response", {
+        component: namespace,
+        event: "stdout",
+        data: { id: "job-1", line: "hi" },
+      });
+
+      assertDeepEqual(seen, [["second", "hi"]]);
+
+      td[namespace].offOutput("job-1");
+      td.__receive("bridge-response", {
+        component: namespace,
+        event: "stdout",
+        data: { id: "job-1", line: "after off" },
+      });
+
+      assert.equal(seen.length, 1, "a listener outlived offOutput");
+    });
+  }
+});
+
+describe("being there before the page's own scripts", () => {
+  // The shell runs this script before anything the page loads, so that a
+  // Stimulus controller can use TurboDesktop in connect(). The document has
+  // no head or body yet at that point.
+  async function beforeThePage() {
+    const dom = new JSDOM(`<!DOCTYPE html>`, {
+      url: "https://myapp.test/",
+      runScripts: "dangerously",
+    });
+    const { window } = dom;
+    // Let jsdom finish loading its own empty document first, so the only
+    // DOMContentLoaded from here on is the one the test dispatches.
+    await tick();
+    const ready = [];
+    const calls = [];
+
+    Object.defineProperty(window.document, "readyState", {
+      get: () => (ready.loaded ? "complete" : "loading"),
+      configurable: true,
+    });
+    window.__TAURI_INTERNALS__ = {
+      invoke: async (cmd, args) => {
+        calls.push({ cmd, args });
+      },
+    };
+    window.document.addEventListener("turbo-desktop:ready", (event) => ready.push(event.detail));
+
+    window.eval(scriptSource);
+
+    return {
+      window,
+      ready,
+      calls,
+      finishLoading() {
+        ready.loaded = true;
+        window.document.dispatchEvent(new window.Event("DOMContentLoaded"));
+      },
+    };
+  }
+
+  it("is usable at once", async () => {
+    const { window } = await beforeThePage();
+
+    assert.equal(window.TurboDesktop.isNative, true);
+    assert.equal(typeof window.TurboDesktop.sendBridgeMessage, "function");
+  });
+
+  it("says it is ready once the document is, and not before", async () => {
+    const { ready, finishLoading } = await beforeThePage();
+    await tick();
+    assert.equal(ready.length, 0, "announced readiness to a document with nothing in it");
+
+    finishLoading();
+    await tick();
+
+    assert.equal(ready.length, 1);
+    assert.equal(ready[0].version, packageVersion);
+  });
+
+  it("says it is ready straight away when the document already is", async () => {
+    const { window } = createEnvironment({ invoke: () => undefined });
+    await tick();
+
+    // Too late to hear the event: what a late listener can check instead.
+    assert.equal(window.TurboDesktop.ready, true);
+  });
+
+  it("looks for the Dev Inspector's tag once there is a head to look in", async () => {
+    const { window, finishLoading } = await beforeThePage();
+    assert.equal(window.TurboDesktop._inspectorWanted, undefined, "decided before the page had a head");
+
+    const meta = window.document.createElement("meta");
+    meta.name = "turbo-desktop-inspector";
+    meta.content = "enabled";
+    window.document.head.appendChild(meta);
+    finishLoading();
+    await tick();
+
+    assert.equal(window.TurboDesktop._inspectorWanted, true);
+  });
+
+  it("sets the title once there is one", async () => {
+    const { window, calls, finishLoading } = await beforeThePage();
+    window.document.title = "Tasks";
+
+    finishLoading();
+    await tick();
+
+    const titles = calls.filter((call) => call.cmd === "update_window_title");
+    assert.equal(titles.at(-1).args.title, "Tasks");
+  });
+});
+
+describe("elements that declare a bridge component", () => {
+  // What `turbo_desktop_bridge("menu-item", title: "Export PDF", shortcut: "Cmd+E")`
+  // writes. The attributes were written and never read.
+  function page(html) {
+    const env = createEnvironment({ invoke: () => ({ status: "ok" }) });
+    env.window.document.body.innerHTML = html;
+    env.window.document.dispatchEvent(new env.window.Event("turbo:load"));
+    return env;
+  }
+
+  function messages(calls, component) {
+    return calls
+      .filter((call) => call.cmd === "handle_bridge_message")
+      .map((call) => call.args.message)
+      .filter((message) => message.component === component);
+  }
+
+  function receive(window, component, event, data) {
+    window.TurboDesktop.__receive("bridge-response", { component, event, data });
+  }
+
+  it("puts a menu item in the menu bar", async () => {
+    const { calls } = page(`
+      <button id="export"
+              data-turbo-desktop-bridge="menu-item"
+              data-turbo-desktop-bridge-title="Export PDF"
+              data-turbo-desktop-bridge-shortcut="CmdOrCtrl+E">Export PDF</button>`);
+    await tick();
+
+    assertDeepEqual(messages(calls, "menu-item"), [
+      {
+        component: "menu-item",
+        event: "connect",
+        data: { id: "Export PDF", title: "Export PDF", shortcut: "CmdOrCtrl+E" },
+      },
+    ]);
+  });
+
+  it("presses the element when its menu item is chosen", async () => {
+    const { window } = page(`
+      <button id="export" data-turbo-desktop-bridge="menu-item"
+              data-turbo-desktop-bridge-title="Export PDF">Export PDF</button>`);
+    let clicks = 0;
+    window.document.getElementById("export").addEventListener("click", () => clicks++);
+    await tick();
+
+    receive(window, "menu-item", "clicked", { id: "Export PDF" });
+
+    assert.equal(clicks, 1);
+  });
+
+  it("presses the element when its shortcut is pressed", async () => {
+    const { window, calls } = page(`
+      <button id="add" data-turbo-desktop-bridge="shortcut"
+              data-turbo-desktop-bridge-id="quick-add"
+              data-turbo-desktop-bridge-accelerator="CmdOrCtrl+Shift+K">Add</button>`);
+    let clicks = 0;
+    window.document.getElementById("add").addEventListener("click", () => clicks++);
+    await tick();
+
+    assertDeepEqual(messages(calls, "shortcut")[0].data, {
+      id: "quick-add",
+      accelerator: "CmdOrCtrl+Shift+K",
+    });
+    receive(window, "shortcut", "triggered", { id: "quick-add", accelerator: "CmdOrCtrl+Shift+K" });
+
+    assert.equal(clicks, 1);
+  });
+
+  it("shows a notification when the element is pressed", async () => {
+    const { window, calls } = page(`
+      <button id="done" data-turbo-desktop-bridge="notification"
+              data-turbo-desktop-bridge-title="Task done"
+              data-turbo-desktop-bridge-body="Well done">Complete</button>`);
+    await tick();
+    assert.equal(messages(calls, "notification").length, 0, "shown before anyone pressed anything");
+
+    window.document.getElementById("done").click();
+    await tick();
+
+    assertDeepEqual(messages(calls, "notification"), [
+      { component: "notification", event: "show", data: { title: "Task done", body: "Well done" } },
+    ]);
+  });
+
+  it("sets the badge to the count on the page", async () => {
+    const { calls } = page(`<span data-turbo-desktop-bridge="badge" data-turbo-desktop-bridge-count="4">4</span>`);
+    await tick();
+
+    assertDeepEqual(messages(calls, "badge")[0].data, { count: 4 });
+  });
+
+  it("binds an element once, however often the page is rendered", async () => {
+    const { window, calls } = page(`
+      <button data-turbo-desktop-bridge="menu-item" data-turbo-desktop-bridge-title="Export PDF">x</button>`);
+    await tick();
+
+    window.document.dispatchEvent(new window.Event("turbo:render"));
+    window.document.dispatchEvent(new window.Event("turbo:load"));
+    await tick();
+
+    assert.equal(messages(calls, "menu-item").length, 1);
+  });
+
+  it("takes the menu item away when the page that declared it has gone", async () => {
+    const { window, calls } = page(`
+      <button data-turbo-desktop-bridge="menu-item" data-turbo-desktop-bridge-title="Export PDF">x</button>`);
+    await tick();
+
+    window.document.body.innerHTML = "<p>Another page</p>";
+    window.document.dispatchEvent(new window.Event("turbo:load"));
+    await tick();
+
+    assertDeepEqual(messages(calls, "menu-item").at(-1), {
+      component: "menu-item",
+      event: "unregister",
+      data: { id: "Export PDF" },
+    });
+  });
+
+  it("does not press an element that is no longer on the page", async () => {
+    const { window } = page(`
+      <button id="export" data-turbo-desktop-bridge="menu-item"
+              data-turbo-desktop-bridge-title="Export PDF">x</button>`);
+    const button = window.document.getElementById("export");
+    let clicks = 0;
+    button.addEventListener("click", () => clicks++);
+    await tick();
+
+    button.remove();
+    receive(window, "menu-item", "clicked", { id: "Export PDF" });
+
+    assert.equal(clicks, 0);
+  });
+});
+
+describe("TurboDesktop.toggleDevTools", () => {
+  it("asks the shell to open the developer tools", async () => {
+    const { window, calls } = createEnvironment({ invoke: () => ({ status: "opened" }) });
+
+    await window.TurboDesktop.toggleDevTools();
+
+    const asked = calls
+      .filter((call) => call.cmd === "handle_bridge_message")
+      .map((call) => call.args.message)
+      .filter((message) => message.component === "devtools");
+    assertDeepEqual(asked, [{ component: "devtools", event: "toggle", data: {} }]);
+  });
+});
+
+describe("loading the Dev Inspector", () => {
+  function withTheTag() {
+    const env = createEnvironment({ invoke: () => undefined });
+    const meta = env.window.document.createElement("meta");
+    meta.name = "turbo-desktop-inspector";
+    meta.content = "enabled";
+    meta.dataset.inspectorUrl = "/turbo-desktop/inspector.js";
+    env.window.document.head.appendChild(meta);
+    return env;
+  }
+
+  it("tells the shell where to import it from", () => {
+    const { window } = withTheTag();
+
+    assert.equal(window.TurboDesktop._inspectorUrl(), "/turbo-desktop/inspector.js");
+  });
+
+  it("has nowhere to import it from when the page does not ask for it", () => {
+    const { window } = createEnvironment({ invoke: () => undefined });
+
+    assert.equal(window.TurboDesktop._inspectorUrl(), null);
+  });
+
+  it("starts it once, whoever imported it", () => {
+    const { window } = withTheTag();
+    let starts = 0;
+    const module = { startInspector: () => starts++ };
+
+    window.TurboDesktop._startInspector(module);
+    window.TurboDesktop._startInspector(module);
+
+    assert.equal(starts, 1);
+    assert.equal(window.TurboDesktop._inspectorUrl(), null, "asked to import what has already started");
+  });
+
+  it("tries again after a start that failed", () => {
+    const { window } = withTheTag();
+    let starts = 0;
+
+    assert.throws(() =>
+      window.TurboDesktop._startInspector({
+        startInspector: () => {
+          throw new Error("no body yet");
+        },
+      })
+    );
+    window.TurboDesktop._startInspector({ startInspector: () => starts++ });
+
+    assert.equal(starts, 1);
+  });
+});
+
+describe("a modal that moves on to an ordinary page", () => {
+  // What happens when a form in a modal is saved: the server redirects to the
+  // list, which is not a modal's page. The modal stayed open showing the
+  // list, and the window underneath never heard about the new record.
+  function inAModal(decision) {
+    const dom = new JSDOM(`<!DOCTYPE html><html><head><title>New task</title></head><body></body></html>`, {
+      url: "https://myapp.test/tasks/new",
+      runScripts: "dangerously",
+    });
+    const { window } = dom;
+    const calls = [];
+    const visits = [];
+
+    window.__TURBO_DESKTOP_WINDOW_LABEL__ = "modal-9b8b948";
+    window.__TAURI_INTERNALS__ = {
+      invoke: async (cmd, args) => {
+        calls.push({ cmd, args });
+        return cmd === "handle_visit_proposal" ? decision : undefined;
+      },
+    };
+    window.eval(scriptSource);
+    window.Turbo = { visit: (url, options) => visits.push({ url, ...options }) };
+
+    return { window, calls, visits };
+  }
+
+  function propose(window, url) {
+    const event = new window.CustomEvent("turbo:before-visit", {
+      detail: { url },
+      cancelable: true,
+    });
+    window.document.dispatchEvent(event);
+    return event;
+  }
+
+  it("closes, and sends the window underneath there instead", async () => {
+    const { window, calls, visits } = inAModal({ action: "advance", presentation: "default" });
+
+    propose(window, "https://myapp.test/tasks");
+    await tick();
+
+    const dismissed = calls.filter((call) => call.cmd === "dismiss_modal");
+    assertDeepEqual(dismissed.map((call) => call.args), [
+      { label: null, then: "visit", url: "https://myapp.test/tasks" },
+    ]);
+    assertDeepEqual(visits, [], "the modal went to the list itself");
+  });
+
+  // A saved form's modal went on showing its form for as long as the shell
+  // took to answer, and whatever the page did meanwhile, then closed. It has
+  // nothing more to show once it is on its way somewhere.
+  it("shows nothing while the shell decides", async () => {
+    const { window } = inAModal({ action: "advance", presentation: "default" });
+
+    propose(window, "https://myapp.test/tasks");
+
+    assert.equal(window.document.documentElement.style.visibility, "hidden");
+  });
+
+  it("shows itself again when it turns out to be staying", async () => {
+    const { window } = inAModal({ action: "none", presentation: "modal" });
+
+    propose(window, "https://myapp.test/tasks/1/edit");
+    await tick();
+
+    assert.equal(window.document.documentElement.style.visibility, "");
+  });
+
+  it("does not blank the main window, which is going nowhere", async () => {
+    const { window } = createEnvironment({
+      invoke: (cmd) =>
+        cmd === "handle_visit_proposal" ? { action: "advance", presentation: "default" } : undefined,
+    });
+    window.Turbo = { visit() {} };
+
+    propose(window, "https://myapp.test/tasks");
+
+    assert.equal(window.document.documentElement.style.visibility, "");
+  });
+
+  it("stays open for a page that is a modal's own", async () => {
+    const { window, calls } = inAModal({ action: "none", presentation: "modal" });
+
+    propose(window, "https://myapp.test/tasks/1/edit");
+    await tick();
+
+    assert.equal(calls.filter((call) => call.cmd === "dismiss_modal").length, 0);
+  });
+
+  it("does not close the main window, which is nobody's modal", async () => {
+    const visits = [];
+    const { window, calls } = createEnvironment({
+      invoke: (cmd) =>
+        cmd === "handle_visit_proposal" ? { action: "advance", presentation: "default" } : undefined,
+    });
+    window.Turbo = { visit: (url, options) => visits.push({ url, ...options }) };
+
+    propose(window, "https://myapp.test/tasks");
+    await tick();
+
+    assert.equal(calls.filter((call) => call.cmd === "dismiss_modal").length, 0);
+    assert.equal(visits.length, 1);
+  });
+
+  it("goes where a closing modal sends it", async () => {
+    const visits = [];
+    const { window } = createEnvironment({ invoke: () => undefined });
+    window.Turbo = { visit: (url, options) => visits.push({ url, ...options }) };
+
+    window.TurboDesktop.__receive("navigate", {
+      action: "visit",
+      url: "https://myapp.test/tasks",
+    });
+
+    assertDeepEqual(visits, [{ url: "https://myapp.test/tasks", action: "replace" }]);
+  });
+});
+
+describe("a link that started the app", () => {
+  // The link arrives before the page does. The shell keeps it, and the page
+  // asks for it once it is there.
+  function appPage({ pending, url = "http://localhost:3000/" }) {
+    const dom = new JSDOM(`<!DOCTYPE html><html><head><title>Home</title></head><body></body></html>`, {
+      url,
+      runScripts: "dangerously",
+    });
+    const { window } = dom;
+    const calls = [];
+    const visits = [];
+    let kept = pending;
+
+    window.__TURBO_DESKTOP_SERVER_URL__ = "http://localhost:3000";
+    window.__TAURI_INTERNALS__ = {
+      invoke: async (cmd, args) => {
+        calls.push({ cmd, args });
+        if (cmd !== "handle_bridge_message") return undefined;
+        if (args.message.component === "deep-link" && args.message.event === "pending") {
+          const url = kept;
+          kept = null;
+          return { status: "ok", url };
+        }
+        return { status: "ok", paths: [] };
+      },
+    };
+    window.Turbo = { visit: (to, options) => visits.push({ url: to, ...options }) };
+    window.eval(scriptSource);
+
+    return { window, calls, visits, keep: (link) => (kept = link) };
+  }
+
+  it("is followed once the page is there", async () => {
+    const { visits } = appPage({ pending: "http://localhost:3000/orders/123?ref=email" });
+    await tick();
+    await tick();
+
+    assertDeepEqual(visits, [{ url: "http://localhost:3000/orders/123?ref=email" }]);
+  });
+
+  it("is nothing to follow when the app was opened the ordinary way", async () => {
+    const { visits } = appPage({ pending: null });
+    await tick();
+    await tick();
+
+    assertDeepEqual(visits, []);
+  });
+
+  it("is followed when it arrives with the app already open", async () => {
+    const { window, visits, keep } = appPage({ pending: null });
+    await tick();
+
+    keep("http://localhost:3000/tasks");
+    window.TurboDesktop.__receive("deep-link-pending", {});
+    await tick();
+
+    assertDeepEqual(visits, [{ url: "http://localhost:3000/tasks" }]);
+  });
+
+  it("is left for the app, by a page that is not the app", async () => {
+    // The waiting page, shown while the server starts. Following the link
+    // from here would be asking a server that is not up yet.
+    const { visits, calls } = appPage({
+      pending: "http://localhost:3000/orders/123",
+      url: "http://127.0.0.1:1430/error.html?error=network_failure",
+    });
+    await tick();
+    await tick();
+
+    assertDeepEqual(visits, []);
+    assert.equal(
+      calls.filter(
+        (call) => call.cmd === "handle_bridge_message" && call.args.message.component === "deep-link"
+      ).length,
+      0,
+      "the waiting page took the link, and the app will never see it"
+    );
+  });
+});
+
+describe("a file that started the app", () => {
+  it("is left for the app, by the page shown while the server starts", async () => {
+    const dom = new JSDOM(`<!DOCTYPE html><html><head></head><body></body></html>`, {
+      url: "http://127.0.0.1:1430/error.html?error=network_failure",
+      runScripts: "dangerously",
+    });
+    const { window } = dom;
+    const asked = [];
+    window.__TURBO_DESKTOP_SERVER_URL__ = "http://localhost:3000";
+    window.__TAURI_INTERNALS__ = {
+      invoke: async (cmd, args) => {
+        if (cmd === "handle_bridge_message") asked.push(args.message.component);
+        return { status: "ok", paths: ["/tmp/tasks.csv"] };
+      },
+    };
+
+    window.eval(scriptSource);
+    await tick();
+
+    assert.equal(
+      asked.includes("file-open"),
+      false,
+      "the waiting page took the file, and the app will never see it"
+    );
+  });
+});
+
+describe("asking before something is done", () => {
+  // Turbo asks with the browser's confirm(), which a webview in the shell
+  // does not show: it answers no, and says nothing. Every data-turbo-confirm
+  // was a button that did nothing.
+  function shellThatAnswers(confirmed) {
+    const env = createEnvironment({
+      invoke: (cmd, args) => {
+        if (cmd !== "handle_bridge_message") return undefined;
+        const { component, event } = args.message;
+        if (component === "dialog" && event === "confirm") return { status: "ok", confirmed };
+        return { status: "ok" };
+      },
+    });
+    return env;
+  }
+
+  function asked(calls) {
+    return calls
+      .filter((call) => call.cmd === "handle_bridge_message")
+      .map((call) => call.args.message)
+      .filter((message) => message.component === "dialog");
+  }
+
+  it("asks with a dialog of the system's own", async () => {
+    const { window, calls } = shellThatAnswers(true);
+
+    const answer = await window.TurboDesktop.confirm("Are you sure?");
+
+    assert.equal(answer, true);
+    assertDeepEqual(asked(calls), [
+      { component: "dialog", event: "confirm", data: { message: "Are you sure?" } },
+    ]);
+  });
+
+  it("takes no for an answer", async () => {
+    const { window } = shellThatAnswers(false);
+
+    assert.equal(await window.TurboDesktop.confirm("Are you sure?"), false);
+  });
+
+  it("does not go ahead when the shell cannot ask", async () => {
+    const { window } = createEnvironment({
+      invoke: () => {
+        throw new Error("the shell is gone");
+      },
+    });
+
+    assert.equal(await window.TurboDesktop.confirm("Delete everything?"), false);
+  });
+
+  it("can say what the buttons are called", async () => {
+    const { window, calls } = shellThatAnswers(true);
+
+    await window.TurboDesktop.confirm("Delete this task?", {
+      title: "Delete",
+      confirm: "Delete",
+      cancel: "Keep",
+    });
+
+    assertDeepEqual(asked(calls)[0].data, {
+      message: "Delete this task?",
+      title: "Delete",
+      confirm: "Delete",
+      cancel: "Keep",
+    });
+  });
+
+  it("is what Turbo asks with", async () => {
+    const { window, calls } = shellThatAnswers(true);
+    window.Turbo = { config: { forms: {} }, visit() {} };
+    window.document.dispatchEvent(new window.Event("turbo:load"));
+
+    const answer = await window.Turbo.config.forms.confirm("Are you sure?");
+
+    assert.equal(answer, true);
+    assert.equal(asked(calls).length, 1);
+  });
+
+  it("is what an older Turbo asks with", async () => {
+    const { window } = shellThatAnswers(true);
+    let method;
+    window.Turbo = { setConfirmMethod: (fn) => (method = fn), visit() {} };
+    window.document.dispatchEvent(new window.Event("turbo:load"));
+
+    assert.equal(typeof method, "function");
+    assert.equal(await method("Are you sure?"), true);
+  });
+
+  it("leaves alone a way of asking the app has chosen for itself", async () => {
+    const { window } = shellThatAnswers(true);
+    const own = async () => false;
+    window.Turbo = { config: { forms: { confirm: own } }, visit() {} };
+
+    window.document.dispatchEvent(new window.Event("turbo:load"));
+
+    assert.equal(window.Turbo.config.forms.confirm, own);
+  });
+});
+
+describe("a file that started the app, and the page that is to receive it", () => {
+  // The bridge is there before the page's scripts. What the page is to be
+  // told has to wait until the page is listening, which is once its own
+  // scripts have run: a Stimulus controller connects when the document is
+  // ready, after anything that was waiting for that before it.
+  async function pageThatListensLate() {
+    const dom = new JSDOM(`<!DOCTYPE html><html><head></head><body></body></html>`, {
+      url: "http://localhost:3000/",
+      runScripts: "dangerously",
+    });
+    const { window } = dom;
+    await tick();
+
+    let loaded = false;
+    Object.defineProperty(window.document, "readyState", {
+      get: () => (loaded ? "complete" : "loading"),
+      configurable: true,
+    });
+    window.__TURBO_DESKTOP_SERVER_URL__ = "http://localhost:3000";
+    let pending = ["/Users/someone/Desktop/tasks.csv"];
+    window.__TAURI_INTERNALS__ = {
+      invoke: async (cmd, args) => {
+        if (cmd !== "handle_bridge_message") return undefined;
+        if (args.message.component === "file-open") {
+          const paths = pending;
+          pending = [];
+          return { status: "ok", paths };
+        }
+        return { status: "ok" };
+      },
+    };
+
+    window.eval(scriptSource);
+
+    const received = [];
+    // The app's controller, connecting when the document is ready.
+    window.document.addEventListener("DOMContentLoaded", () => {
+      window.document.addEventListener("turbo-desktop:file-open", (event) =>
+        received.push(event.detail.paths)
+      );
+    });
+
+    return {
+      received,
+      async finishLoading() {
+        window.document.dispatchEvent(new window.Event("DOMContentLoaded"));
+        loaded = true;
+        window.dispatchEvent(new window.Event("load"));
+        await tick();
+        await tick();
+      },
+    };
+  }
+
+  it("is handed over once the page is listening", async () => {
+    const { received, finishLoading } = await pageThatListensLate();
+    await tick();
+
+    await finishLoading();
+
+    assertDeepEqual(received, [["/Users/someone/Desktop/tasks.csv"]]);
   });
 });

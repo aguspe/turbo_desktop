@@ -45,9 +45,10 @@ Minitest::Test.prepend(ConfigurationReset)
 
 # Stub request object for controller/view helper tests
 class StubRequest
-  attr_accessor :user_agent
+  attr_accessor :user_agent, :path
 
-  def initialize(user_agent = "")
+  def initialize(user_agent = "", path: "/")
     @user_agent = user_agent
+    @path = path
   end
 end

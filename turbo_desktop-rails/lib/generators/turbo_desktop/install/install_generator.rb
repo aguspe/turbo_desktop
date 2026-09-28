@@ -21,8 +21,8 @@ module TurboDesktop
         say ""
         say "Next steps:"
         say "  1. npx turbo-desktop init    # Scaffold the desktop shell"
-        say "  2. rails server              # Start your Rails app"
-        say "  3. npx turbo-desktop dev     # Launch the desktop app"
+        say "  2. cd desktop"
+        say "  3. npx turbo-desktop dev     # Opens the app, and starts Rails with it"
         say ""
       end
     end

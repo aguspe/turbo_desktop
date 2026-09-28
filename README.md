@@ -48,11 +48,20 @@ Here's what a Rails app looks like running inside Turbo Desktop (from the [examp
   <img src="docs/screenshots/dashboard.png" alt="Dashboard — desktop features banner, stats, recent tasks" width="700" />
 </p>
 
+The same app, from the same Rails code, on the three platforms:
+
+| macOS | Windows | Linux |
+|---|---|---|
+| <img src="docs/screenshots/macos.png" alt="The Task Manager on macOS" width="280" /> | <img src="docs/screenshots/windows.png" alt="The Task Manager on Windows 11" width="280" /> | <img src="docs/screenshots/linux.png" alt="The Task Manager on Ubuntu" width="280" /> |
+
+The badge in the corner of each is what Rails was told: `turbo_desktop_platform`,
+`turbo_desktop_arch`, and the shell's version.
+
 ## Features
 
 - **No new UI framework** — your existing Rails views, Turbo Frames, and Stimulus controllers just work
 - **Native when you need it** — notifications, file pickers, menus, and keyboard shortcuts via Bridge Components
-- **Tiny binary** — Tauri uses the OS WebView, no bundled Chromium. Ship a ~5-10 MB app
+- **Small installers** — Tauri uses the OS WebView, no bundled Chromium. The shell's own installers are 5 to 15 MB
 - **Path configuration** — JSON-based routing rules (same concept as turbo-ios / turbo-android)
 - **Bridge components** — web-to-native communication via Stimulus controllers
 - **Rails gem** — `turbo_desktop-rails` gives your Rails app desktop shell awareness
@@ -188,8 +197,9 @@ first:
 }
 ```
 
-- `command` runs through your login shell on macOS and Linux, so a Ruby version
-  manager (rbenv, asdf, mise) is set up the same way it would be in a terminal.
+- `command` runs through your shell on macOS and Linux, started as a login and
+  interactive one, so a Ruby version manager (rbenv, asdf, mise) is set up the
+  same way it would be in a terminal.
   On Windows it runs through `cmd`, and the Unix `bin/rails` binstub does not
   apply — set `command` to `ruby bin\rails server` there.
 - `directory` is resolved relative to the config file and defaults to `..` —
@@ -217,8 +227,12 @@ rails generate turbo_desktop:install
 
 ```ruby
 # config/routes.rb
-get "/turbo-desktop/path-configuration", to: "turbo_desktop#path_configuration"
+mount TurboDesktop::Engine => "/turbo-desktop"
 ```
+
+The installer adds this line for you. It serves
+`/turbo-desktop/path-configuration.json` from the rules in
+`config/initializers/turbo_desktop.rb`, and the Dev Inspector's scripts.
 
 ### 5. Run the desktop app
 
@@ -282,6 +296,73 @@ The Bridge is the desktop equivalent of **Strada**. It lets your web components 
 | `file-picker` | Open native file-open/save dialogs |
 | `badge` | Set the dock/taskbar badge count |
 | `shortcut` | Register global keyboard shortcuts |
+| `filesystem` | Read and write inside declared roots and granted paths |
+| `shell` | Run child processes through the login shell, output streamed |
+| `sudo` | Run allowlisted commands elevated: macOS dialog, polkit, UAC |
+| `clipboard` | Read and write the system clipboard, no gesture needed |
+| `autostart` | Launch at login, behind a toggle the user can see |
+| `file-open` | Files opened with the app, even from a cold launch |
+| `deep-link` | The link the app was asked to open, kept until the page is there |
+| `updater` | Check for and install app updates |
+| `dialog` | Ask or tell with a dialog of the system's own; what `data-turbo-confirm` uses |
+| `devtools` | Open the webview's developer tools (development builds) |
+
+A file dialog can be told what it is for:
+
+```js
+TurboDesktop.sendBridgeMessage("file-picker", "save", {
+  title: "Export tasks",
+  defaultName: "tasks.csv",
+  filters: [{ name: "CSV", extensions: ["csv"] }]
+})
+```
+
+Under `tauri dev` on macOS, notifications are shown through AppleScript: a
+bare binary has no bundle for the system to file them under. A built app shows
+them as its own, and asks permission the first time. Either way a Focus mode
+keeps them out of the corner of the screen and puts them in the notification
+centre.
+
+A component that cannot do its job on the machine it is running on (no
+notification service, a shortcut another application holds) answers with
+`status: "unavailable"` and the reason, rather than failing.
+
+Menu items a page registers go into an **Actions** menu at the end of the
+menu bar, which is there while it has something in it, and choosing one
+sends `{ event: "clicked", data: { id } }` to the `menu-item` component. A
+global shortcut sends `{ event: "triggered", data: { id, accelerator } }` to
+the `shortcut` component, whether or not the app is in front:
+
+```js
+TurboDesktop.sendBridgeMessage("menu-item", "connect", {
+  id: "export", title: "Export PDF", shortcut: "CmdOrCtrl+E"
+})
+TurboDesktop.sendBridgeMessage("shortcut", "register", {
+  id: "quick-add", accelerator: "CmdOrCtrl+Shift+K"
+})
+TurboDesktop.sendBridgeMessage("badge", "set", { count: 3 })   // 0 clears it
+TurboDesktop.sendBridgeMessage("notification", "show", {
+  title: "Task done", body: "Set up Turbo Desktop"
+})
+```
+
+`filesystem`, `shell`, `sudo`, `clipboard`, `autostart`, `updater`, `dialog` and
+`devtools` have a JavaScript API of their own on `TurboDesktop`
+(`TurboDesktop.fs`, `.shell`, `.clipboard`, and so on). The others are reached
+with `sendBridgeMessage`, from markup with `turbo_desktop_bridge`, or arrive as
+DOM events. All of it is typed in `src/turbo-desktop.d.ts` and in the
+[`turbo-desktop-bridge`](packages/bridge) npm package.
+
+#### What differs between platforms
+
+| Component | Where it differs |
+|---|---|
+| `badge` | macOS and Linux. Windows has no badge count on a taskbar icon, and the component answers `unavailable` or does nothing there. |
+| `shortcut` | On Linux, under X11 only. Under Wayland a global shortcut cannot be registered and the component answers `unavailable`. |
+| `shell` | Through a login shell on macOS and Linux, through `cmd` on Windows. |
+| `sudo` | On Windows the output of an elevated command arrives when it has finished, not line by line. |
+| `updater` | Off until the app names its update server: see [Distribution](docs/DISTRIBUTION.md#auto-update-optional). |
+| Tray icon | Stock GNOME shows no tray icons without an extension. |
 
 ### Modal and secondary windows
 
@@ -298,6 +379,25 @@ if (TurboDesktop.isModal) {
 }
 TurboDesktop.windowLabel         // e.g. "modal-9b8b948"
 ```
+
+#### A modal that has done its work
+
+A form in a modal is saved, and the server redirects to the list. The list is
+not a modal's page, so the modal closes and the window underneath goes there,
+showing what was saved. The same happens for a link in a modal to any page
+whose rule is not `modal`. Nothing has to be written for this: it is what
+Hotwire Native does, and it follows from the path configuration.
+
+A page rendered for a modal has a window of its own around it, so the app's
+navigation does not belong in it. The gem can tell from the path
+configuration:
+
+```erb
+<%= render "navigation" unless turbo_desktop_modal? %>
+```
+
+`turbo_desktop_presentation` gives the presentation itself: `"default"`,
+`"modal"`, `"new_window"`. Both are nil or false in a browser.
 
 #### Dismissing a modal
 
@@ -343,6 +443,9 @@ macOS Launch Services decides — so if every app built on this shell shared one
 scheme, installing two of them would send one app's links to the other. Pick
 something distinctive: nothing stops unrelated software registering the same
 string.
+
+A link that starts the app is kept until the app's page has loaded, and
+followed then. Nothing has to be written for it.
 
 Links are resolved against `server_url` and refused if they point anywhere else.
 A deep link arrives from outside the app, so it is not trusted to say where to
@@ -421,6 +524,10 @@ reach the shell.
 The shell watches your server and reports failures using the same vocabulary as
 Hotwire Native, so `network_failure`, `timeout_failure`, `http_failure` and
 `page_load_failure` mean here what they mean on turbo-ios and turbo-android.
+The shell reports two of them today, `network_failure` and `http_failure`: a
+server that does not answer in time is reported as a `network_failure`. The
+other two names are kept so that an app written against them goes on working
+when the shell tells them apart.
 
 **What happens by default.** If your server is unreachable at launch, the window
 opens on a bundled error page. If it goes away while the app is running, a
@@ -463,8 +570,7 @@ reported.
 
 ### Bridge security
 
-The bridge reaches the shell, the filesystem and (on macOS) administrator
-privileges, so it is closed by default and opened deliberately.
+The bridge reaches the shell, the filesystem and administrator privileges, so it is closed by default and opened deliberately.
 
 **Origin.** Every bridge message is checked against `server_url` before it is
 dispatched. Only pages served from that origin can use the bridge.
@@ -514,12 +620,39 @@ it arrives in full when the command finishes.
 
 Set `confirm` to `false` only if your app already asks the user itself.
 
+### Asking before something is done
+
+A webview in the shell does not show the browser's `confirm()` and `alert()`:
+a page that asks that way is answered no, and nobody is asked. Turbo asks that
+way for `data-turbo-confirm`, so the shell gives Turbo the system's dialog
+instead, and this works as written:
+
+```erb
+<%= button_to "Delete", task_path(task), method: :delete,
+      data: { turbo_confirm: "Are you sure?" } %>
+```
+
+An app that has set `Turbo.config.forms.confirm` itself keeps its own. To ask
+from JavaScript:
+
+```js
+if (await TurboDesktop.confirm("Delete this task?", { confirm: "Delete", cancel: "Keep" })) {
+  // …
+}
+await TurboDesktop.alert("Exported.", { title: "Tasks" })
+```
+
+No answer is a no: if the shell cannot ask, nothing goes ahead.
+
 ### Drag & drop from the desktop
 
 Files dragged from the Finder or Explorer onto any app window reach your page
 with their real paths — something a browser never gives you. The drop counts as
 consent, like a dialog pick: the dropped files (and folders, with their
-contents) become readable through the filesystem bridge for the session.
+contents) can be reached through the filesystem bridge for the session. That
+is reading and writing both, and for a folder removing what is in it: a grant
+is for the path, not for one thing done to it. The protected locations stay
+refused.
 
 Subscribe from a Stimulus controller with plain DOM events:
 
@@ -586,11 +719,18 @@ your app for them — double-click, "Open With…", drop on the dock icon:
 }
 ```
 
+macOS reports an opened file as a file and as a `file:` URL; it is opened
+once, and is never taken for a link to a page.
+
 Opened files arrive as a `turbo-desktop:file-open` DOM event with
 `event.detail.paths`, whether the app was already running or was launched by
 the double-click — a launch queues the paths until your page is up. Like a
-dialog pick, being asked to open a file grants it for reading through the
-filesystem bridge.
+dialog pick, being asked to open a file grants it through the filesystem
+bridge, for reading and for writing.
+
+On Windows and Linux a file opened while the app is running starts the app a
+second time; that copy hands the file to the one already open and leaves, so
+there is one window either way. Links arrive the same way.
 
 ```js
 // data-action="turbo-desktop:file-open@document->importer#fileOpened"
@@ -604,11 +744,14 @@ async fileOpened(event) {
 In development, press **Cmd/Ctrl+Shift+D** to open the Dev Inspector — an in-app
 overlay that shows:
 
-- **Components** — every available bridge component, with a copy-pasteable
-  Rails + Stimulus snippet, and which are active on the current page
-- **Messages** — a live log of web↔native bridge traffic
-- **Navigation** — the path-configuration presentation applied to the current URL
-- **Shell** — platform, arch, version, and server URL
+- **Components** — the bridge components it knows, and how many messages each
+  has sent since the inspector was opened
+- **Messages** — a live log of what the page sends to the shell
+- **Navigation** — the presentation the path configuration gave the last visit
+- **Shell** — platform, arch and version
+
+It does not list every component yet: `clipboard`, `autostart`, `file-open`,
+`dialog` and `devtools` are missing from it.
 
 Enable it from the Rails gem (added by the installer in development):
 
@@ -665,14 +808,32 @@ Rename it with `config.variant`, or set it to `nil` to leave variants alone.
 
 ### Rails View Helpers
 
+An element can declare a component in its markup, and gets it without a
+Stimulus controller of its own:
+
 ```erb
-<%# Attach bridge data attributes to any element %>
+<%# A menu item, with a shortcut. Choosing it presses the button. %>
 <%= tag.button "Export PDF",
-    **turbo_desktop_bridge("menu-item",
-      title: "Export PDF",
-      shortcut: "Cmd+E"
-    ) %>
+    **turbo_desktop_bridge("menu-item", title: "Export PDF", shortcut: "CmdOrCtrl+E") %>
+
+<%# A shortcut that works with the app in the background. %>
+<%= tag.button "Quick add",
+    **turbo_desktop_bridge("shortcut", id: "quick-add", accelerator: "CmdOrCtrl+Shift+K") %>
+
+<%# A notification when the button is pressed. %>
+<%= tag.button "Complete",
+    **turbo_desktop_bridge("notification", title: "Task completed", body: task.title) %>
+
+<%# The badge on the dock icon, set to what the page shows. %>
+<%= tag.span pending.count, **turbo_desktop_bridge("badge", count: pending.count) %>
 ```
+
+The helper returns whole attribute names, so splat it among the element's
+attributes as above, not inside `data: { }`, which would prefix them a second
+time.
+
+A menu item or shortcut belongs to the page that declared it, and is taken
+away when Turbo moves on to a page that does not.
 
 ## Rails Gem
 
@@ -694,9 +855,9 @@ The `turbo_desktop-rails` gem gives your Rails app awareness of the desktop shel
 | Shell runtime | WKWebView (Swift) | WebView (Kotlin) | Tauri WebView (Rust) |
 | Path configuration | JSON, last-match-wins | JSON, last-match-wins | JSON, last-match-wins |
 | Bridge / native comms | Strada | Strada | BridgeComponent |
-| JS injection | WKUserScript | evaluateJavascript | on_page_load + eval |
+| JS injection | WKUserScript | evaluateJavascript | initialization script |
 | Rails gem | turbo-rails | turbo-rails | turbo_desktop-rails |
-| Binary size | System WebKit | ~20 MB | ~5-10 MB |
+| Installer size | System WebKit | ~20 MB | 5 to 15 MB |
 | Platforms | iOS, iPadOS | Android | macOS, Windows, Linux |
 
 ## Custom App Icon
@@ -729,7 +890,7 @@ Ship native installers for macOS, Windows, and Linux by pushing a git tag — th
 draft GitHub Release:
 
 ```bash
-git tag v0.2.3 && git push origin v0.2.3
+git tag v0.2.4 && git push origin v0.2.4
 ```
 
 See **[docs/DISTRIBUTION.md](docs/DISTRIBUTION.md)** for local builds, using it in your own app,

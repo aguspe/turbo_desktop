@@ -29,7 +29,7 @@ anything, so only your app's own origin can reach them.
 
 ## Project layout
 
-Turbo Desktop is three pieces in one repo:
+Turbo Desktop is several pieces in one repo:
 
 | Path | What it is |
 |------|-----------|
@@ -59,7 +59,7 @@ cargo tauri dev    # the desktop shell (terminal 2)
 
 ## Running the tests
 
-Please run the suite for whichever piece you touched (CI runs all three):
+Please run the suite for whichever piece you touched (CI runs all of them, with RuboCop, ESLint and the end-to-end suite):
 
 ```bash
 # Rails gem
@@ -69,7 +69,7 @@ cd turbo_desktop-rails && bundle exec rake test
 npm test
 
 # Rust shell
-cd src-tauri && cargo check      # cargo test once Rust tests exist
+cd src-tauri && cargo test
 ```
 
 ## Pull requests

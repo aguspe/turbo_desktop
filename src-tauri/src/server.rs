@@ -93,7 +93,8 @@ pub async fn start(
     let stderr = child.stderr.take();
 
     // Registered so quitting the app stops the server it started.
-    let (kill_tx, kill_rx) = tokio::sync::oneshot::channel::<()>();
+    let (kill_tx, kill_rx) =
+        tokio::sync::oneshot::channel::<crate::process_manager::StopRequest>();
     app.state::<crate::process_manager::ProcessManager>()
         .register(
             SERVER_PROCESS_ID.to_string(),
@@ -119,9 +120,12 @@ pub async fn start(
                 line = async { match err.as_mut() { Some(l) => l.next_line().await, None => std::future::pending().await } } => {
                     match line { Ok(Some(l)) => log::warn!("[server] {}", l), _ => err = None }
                 }
-                _ = &mut kill_rx => {
+                request = &mut kill_rx => {
                     log::info!("Stopping the app server");
-                    let _ = child.kill().await;
+                    crate::process_manager::stop_tree(&mut child).await;
+                    if let Ok(request) = request {
+                        request.stopped();
+                    }
                     return;
                 }
                 status = child.wait() => {
@@ -182,7 +186,7 @@ mod tests {
 
     #[test]
     fn the_rails_app_is_a_level_above_the_config_by_default() {
-        let dir = std::env::temp_dir().join("turbo-desktop-server-default");
+        let dir = crate::test_temp_dir().join("turbo-desktop-server-default");
         let desktop = dir.join("desktop");
         std::fs::create_dir_all(&desktop).unwrap();
 
@@ -194,7 +198,7 @@ mod tests {
 
     #[test]
     fn an_explicit_directory_wins() {
-        let dir = std::env::temp_dir().join("turbo-desktop-server-explicit");
+        let dir = crate::test_temp_dir().join("turbo-desktop-server-explicit");
         let api = dir.join("api");
         std::fs::create_dir_all(&api).unwrap();
 
@@ -212,7 +216,7 @@ mod tests {
 
     #[test]
     fn a_missing_directory_is_left_for_the_spawn_to_report() {
-        let dir = std::env::temp_dir().join("turbo-desktop-server-missing");
+        let dir = crate::test_temp_dir().join("turbo-desktop-server-missing");
         let config = ServerConfig {
             command: Some("bin/rails server".into()),
             directory: Some("nope".into()),

@@ -26,6 +26,22 @@ module TurboDesktop
       end
     end
 
+    # How the shell presents the page being rendered: "default", "modal",
+    # "new_window" and so on, from the path configuration. Nil in a browser.
+    def turbo_desktop_presentation
+      return nil unless turbo_desktop_app?
+
+      TurboDesktop.configuration.presentation_for(request.path)
+    end
+
+    # True when the page is being rendered for a modal window. A modal has a
+    # window of its own around it, so the app's navigation does not belong:
+    #
+    #   <%= render "navigation" unless turbo_desktop_modal? %>
+    def turbo_desktop_modal?
+      turbo_desktop_presentation == "modal"
+    end
+
     # Attribute name fragments we are willing to build a data-* attribute from.
     # Values are escaped by the tag helpers, but names are interpolated, so they
     # are restricted rather than escaped.
@@ -78,8 +94,11 @@ module TurboDesktop
 
     # Same-origin URL of the inspector entry module, under the engine's mount
     # path (configurable via config.inspector_mount_path).
+    #
+    # Asked for by version: a webview that has the last version's inspector
+    # would go on using its copy, and has none of this address.
     def turbo_desktop_inspector_url
-      "#{TurboDesktop.configuration.inspector_mount_path.chomp("/")}/inspector.js"
+      "#{TurboDesktop.configuration.inspector_mount_path.chomp("/")}/inspector.js?v=#{TurboDesktop::VERSION}"
     end
 
     private

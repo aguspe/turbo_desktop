@@ -4,16 +4,19 @@
  * Re-exports all types from the turbo-desktop.js bridge.
  */
 
-export {
+export type {
   TurboDesktopAPI,
-  BridgeComponent,
   BridgeMessage,
   BridgeResponse,
   VisitResponse,
   WindowInfo,
-} from "../../src/turbo-desktop";
+  DismissAction,
+  DragDropPayload,
+  VisitFailure,
+  DialogOptions,
+} from "./turbo-desktop.js";
 
-import type { TurboDesktopAPI, BridgeComponent as BridgeComponentClass, BridgeResponse } from "../../src/turbo-desktop";
+import type { TurboDesktopAPI, BridgeComponent as BridgeComponentClass, BridgeResponse } from "./turbo-desktop.js";
 
 /** The main Turbo Desktop API (from `window.TurboDesktop`). */
 export declare const TurboDesktop: TurboDesktopAPI;

@@ -138,7 +138,7 @@ pub fn handle_menu_event<R: Runtime>(app: &tauri::AppHandle<R>, event_id: &str) 
         "reload" => navigate_main(app, "reload"),
         "devtools" => {
             if let Some(window) = app.get_webview_window("main") {
-                let _ = window.eval("window.__TURBO_DESKTOP__.toggleDevTools()");
+                let _ = window.eval("window.__TURBO_DESKTOP__ && window.__TURBO_DESKTOP__.toggleDevTools()");
             }
         }
         "nav-back" => navigate_main(app, "back"),
@@ -162,8 +162,9 @@ pub fn handle_menu_event<R: Runtime>(app: &tauri::AppHandle<R>, event_id: &str) 
                 );
             }
         }
-        _ => {
-            log::debug!("Unhandled menu event: {}", event_id);
-        }
+        _ => match crate::bridge::bridge_item_for_menu_event(event_id) {
+            Some(name) => crate::bridge::menu_item_chosen(app, name),
+            None => log::debug!("Unhandled menu event: {}", event_id),
+        },
     }
 }

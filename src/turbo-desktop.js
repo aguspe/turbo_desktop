@@ -39,10 +39,26 @@
 
   // ─── Core API ──────────────────────────────────────────────────────────────
 
+  // The shell's user agent names the platform it is running on, e.g.
+  // "Turbo Desktop/0.2.4 (Windows; x86_64)". This file is the same on every
+  // platform, so the answer has to be read rather than written in.
+  function detectPlatform() {
+    const agent = navigator.userAgent || "";
+    const named = agent.match(/Turbo Desktop\/[\w.]+ \((\w+);/);
+    if (named) return named[1].toLowerCase();
+
+    if (/Windows/i.test(agent)) return "windows";
+    if (/Linux/i.test(agent)) return "linux";
+    return "macos";
+  }
+
   const TurboDesktop = {
-    version: "0.2.3",
-    platform: "macos",
+    version: "0.2.4",
+    platform: detectPlatform(),
     isNative: true,
+
+    /** True once the document has loaded. `turbo-desktop:ready` says when. */
+    ready: false,
 
     /**
      * Send a visit proposal to the native shell.
@@ -161,11 +177,14 @@
       return TurboDesktop.dismiss("resume");
     },
 
-    async dismiss(then = "resume", label = undefined) {
+    async dismiss(then = "resume", label = undefined, url = undefined) {
       if (!INVOKE) return;
 
       try {
-        await INVOKE("dismiss_modal", { label: label || null, then });
+        const request = { label: label || null, then };
+        // Where the window underneath should go, for `then: "visit"`.
+        if (url) request.url = url;
+        await INVOKE("dismiss_modal", request);
       } catch (e) {
         console.error("[turbo-desktop] Dismiss failed:", e);
       }
@@ -174,10 +193,37 @@
     /**
      * Toggle developer tools (dispatches to Rust which can open the inspector).
      */
-    toggleDevTools() {
-      // Tauri 2 doesn't expose devtools toggle from JS directly,
-      // but we can emit a custom event for the Rust side to handle
-      console.log("[turbo-desktop] DevTools toggle requested");
+    /**
+     * Ask before going ahead, with a dialog of the system's own. Resolves
+     * with true or false. The browser's confirm() is not shown by a webview
+     * in the shell, and answers no.
+     *
+     *   if (await TurboDesktop.confirm("Delete this task?", { confirm: "Delete" })) …
+     */
+    async confirm(message, options = {}) {
+      const answer = await TurboDesktop.sendBridgeMessage("dialog", "confirm", {
+        message: String(message),
+        ...options,
+      });
+      // No answer is a no: what is being asked about is usually not undone.
+      return Boolean(answer && answer.confirmed);
+    },
+
+    /** Say something, with a dialog of the system's own. */
+    async alert(message, options = {}) {
+      await TurboDesktop.sendBridgeMessage("dialog", "alert", {
+        message: String(message),
+        ...options,
+      });
+    },
+
+    /**
+     * Open the webview's developer tools, or close them if they are open.
+     * Development builds only: resolves with `{ status: "unavailable" }` in
+     * an app built for release.
+     */
+    async toggleDevTools() {
+      return TurboDesktop.sendBridgeMessage("devtools", "toggle", {});
     },
 
     // ─── Shell Execution API ─────────────────────────────────────────────────
@@ -224,6 +270,9 @@
           }
         };
 
+        // One listener per process. A controller that connects again, as it
+        // does when Turbo brings its page back, replaces the one it had.
+        this.offOutput(id);
         this._listeners.set(id, onBridgeResponse(handler));
       },
 
@@ -266,6 +315,9 @@
           }
         };
 
+        // One listener per process. A controller that connects again, as it
+        // does when Turbo brings its page back, replaces the one it had.
+        this.offOutput(id);
         this._listeners.set(id, onBridgeResponse(handler));
       },
 
@@ -432,30 +484,78 @@
   // ─── Turbo Drive Integration ───────────────────────────────────────────────
 
   /**
-   * Intercept Turbo Drive's "before-visit" to propose the visit to the native shell.
-   * If the shell decides to open a modal or new window, we cancel the Turbo visit.
+   * Every visit is proposed to the shell, which consults the path
+   * configuration and decides how the URL is presented.
+   *
+   * Turbo reads `defaultPrevented` as soon as the event has been dispatched,
+   * and the shell's answer arrives later, over IPC. So the visit is held
+   * first and carried on with once the shell has agreed to it. Deciding after
+   * the answer, as this used to, was deciding too late: a rule that opened a
+   * modal also navigated the main window to the same URL.
    */
-  document.addEventListener("turbo:before-visit", async (event) => {
+  const approvedVisits = new Set();
+  let clicked = null;
+
+  // The action a link asked for. `before-visit` only says where, not how.
+  document.addEventListener("turbo:click", (event) => {
+    const link = event.target.closest ? event.target.closest("[data-turbo-action]") : null;
+    clicked = {
+      url: event.detail.url,
+      action: link ? link.dataset.turboAction : "advance",
+    };
+  });
+
+  function carryOn(url, action) {
+    if (!window.Turbo) {
+      window.location.assign(url);
+      return;
+    }
+
+    approvedVisits.add(url);
+    window.Turbo.visit(url, { action });
+  }
+
+  document.addEventListener("turbo:before-visit", (event) => {
     const url = event.detail.url;
 
-    // Notify Rust that a page is loading
-    if (INVOKE) {
-      INVOKE("page_loading", { url }).catch(() => {});
+    // A visit the shell has already agreed to, coming back round.
+    if (approvedVisits.delete(url)) {
+      if (INVOKE) {
+        INVOKE("page_loading", { url }).catch(() => {});
+      }
+      return;
     }
 
-    // Propose the visit to the native shell
-    const response = await TurboDesktop.proposeVisit(url, "advance");
+    const action = clicked && clicked.url === url ? clicked.action : "advance";
+    clicked = null;
 
-    // If the native shell handled it (modal, new window, native screen),
-    // cancel the Turbo visit — the native side opens the URL itself.
-    if (response.action === "none") {
-      event.preventDefault();
-    }
-    // If "replace", tell Turbo to replace instead of advance
-    else if (response.action === "replace") {
-      event.preventDefault();
-      window.Turbo?.visit(url, { action: "replace" });
-    }
+    event.preventDefault();
+
+    // A modal on its way somewhere has nothing more to show: what it was for
+    // is done. Blank until the shell has said whether it is staying.
+    const leaving = TurboDesktop.isModal;
+    if (leaving) document.documentElement.style.visibility = "hidden";
+
+    TurboDesktop.proposeVisit(url, action).then((response) => {
+      // A modal, a new window, a native screen: the shell opens the URL
+      // itself, and this window stays where it is.
+      const decided = response ? response.action : action;
+      if (decided === "none") {
+        // The shell opened the page in a window of its own. This one stays.
+        if (leaving) document.documentElement.style.visibility = "";
+        return;
+      }
+
+      // A modal heading for a page that is not a modal's: a saved form being
+      // sent back to the list. The modal has done its work. It closes, and
+      // the window underneath goes there, so it shows what was saved.
+      if (TurboDesktop.isModal) {
+        TurboDesktop.dismiss("visit", undefined, new URL(url, window.location.href).href);
+        return;
+      }
+
+      carryOn(url, decided === "replace" ? "replace" : action);
+    });
   });
 
   /**
@@ -576,11 +676,17 @@
    *   }
    */
   TurboDesktop.stimulusBridge = function (BaseController, componentName) {
+    // A class of its own for each component. Naming the component on
+    // BridgeComponent itself renamed it for every controller on the page, so
+    // two of them both spoke as whichever connected last.
+    class Component extends BridgeComponent {
+      static component = componentName;
+    }
+
     return class extends BaseController {
       connect() {
         super.connect();
-        this._bridge = new BridgeComponent(this.element);
-        this._bridge.constructor.component = componentName;
+        this._bridge = new Component(this.element);
         this._bridge.onReceive = (msg) => this.receiveBridge(msg);
         this._bridge.connect();
       }
@@ -601,6 +707,139 @@
       }
     };
   };
+
+  // ─── Components declared in the markup ─────────────────────────────────────
+  //
+  // What the Rails helper writes:
+  //
+  //   <%= tag.button "Export PDF",
+  //         **turbo_desktop_bridge("menu-item", title: "Export PDF", shortcut: "CmdOrCtrl+E") %>
+  //
+  // An element that declares a component gets it without a controller of its
+  // own. Choosing the menu item, or pressing the shortcut, presses the element.
+
+  const BRIDGE_ATTRIBUTE = "data-turbo-desktop-bridge";
+  const BRIDGE_OPTION = "turboDesktopBridge";
+  const boundElements = new WeakSet();
+  // What is registered with the shell, and the element that asked for it.
+  const declared = { "menu-item": new Map(), shortcut: new Map() };
+
+  function optionsOf(element) {
+    const options = {};
+    for (const [key, value] of Object.entries(element.dataset)) {
+      if (key.startsWith(BRIDGE_OPTION) && key.length > BRIDGE_OPTION.length) {
+        const name = key.slice(BRIDGE_OPTION.length);
+        options[name.charAt(0).toLowerCase() + name.slice(1)] = value;
+      }
+    }
+    return options;
+  }
+
+  const bindings = {
+    "menu-item"(element, options) {
+      const id = options.id || options.title;
+      if (!id) return;
+
+      declared["menu-item"].set(id, element);
+      const data = { id, title: options.title || id };
+      if (options.shortcut) data.shortcut = options.shortcut;
+      TurboDesktop.sendBridgeMessage("menu-item", "connect", data);
+    },
+
+    shortcut(element, options) {
+      if (!options.accelerator) return;
+
+      const id = options.id || options.accelerator;
+      declared.shortcut.set(id, element);
+      element.dataset.turboDesktopShortcut = options.accelerator;
+      TurboDesktop.sendBridgeMessage("shortcut", "register", {
+        id,
+        accelerator: options.accelerator,
+      });
+    },
+
+    notification(element) {
+      // Read when it is pressed, not when it is bound: the title and body
+      // may have been changed since.
+      element.addEventListener("click", () => {
+        const { title, body } = optionsOf(element);
+        TurboDesktop.sendBridgeMessage("notification", "show", {
+          title: title || "",
+          body: body || "",
+        });
+      });
+    },
+
+    badge(_element, options) {
+      TurboDesktop.sendBridgeMessage("badge", "set", { count: Number(options.count) || 0 });
+    },
+  };
+
+  function bindDeclaredComponents() {
+    // Whatever was declared by a page that has since gone.
+    for (const [id, element] of declared["menu-item"]) {
+      if (element.isConnected) continue;
+      declared["menu-item"].delete(id);
+      TurboDesktop.sendBridgeMessage("menu-item", "unregister", { id });
+    }
+    for (const [id, element] of declared.shortcut) {
+      if (element.isConnected) continue;
+      declared.shortcut.delete(id);
+      TurboDesktop.sendBridgeMessage("shortcut", "unregister", {
+        accelerator: element.dataset.turboDesktopShortcut,
+      });
+    }
+
+    document.querySelectorAll(`[${BRIDGE_ATTRIBUTE}]`).forEach((element) => {
+      if (boundElements.has(element)) return;
+      boundElements.add(element);
+
+      const bind = bindings[element.getAttribute(BRIDGE_ATTRIBUTE)];
+      if (bind) bind(element, optionsOf(element));
+    });
+  }
+
+  onBridgeResponse((event) => {
+    const { component, event: name, data } = event.payload || {};
+    const chosen =
+      (component === "menu-item" && name === "clicked") ||
+      (component === "shortcut" && name === "triggered");
+    if (!chosen || !data) return;
+
+    const element = declared[component].get(data.id);
+    if (element && element.isConnected) element.click();
+  });
+
+  // ─── What Turbo asks with ──────────────────────────────────────────────────
+  //
+  // data-turbo-confirm asks with the browser's confirm(), which a webview in
+  // the shell does not show. Turbo is given the system's dialog instead,
+  // unless the app has chosen a way of asking for itself.
+
+  function giveTurboAWayToAsk() {
+    const turbo = window.Turbo;
+    if (!turbo || turbo.__turboDesktopAsks) return;
+
+    const ask = (message) => TurboDesktop.confirm(message);
+
+    if (turbo.config && turbo.config.forms) {
+      if (turbo.config.forms.confirm) return;
+      turbo.config.forms.confirm = ask;
+    } else if (typeof turbo.setConfirmMethod === "function") {
+      turbo.setConfirmMethod(ask);
+    } else {
+      return;
+    }
+    turbo.__turboDesktopAsks = true;
+  }
+
+  document.addEventListener("turbo:load", giveTurboAWayToAsk);
+  document.addEventListener("turbo:before-fetch-request", giveTurboAWayToAsk);
+  document.addEventListener("turbo:click", giveTurboAWayToAsk);
+
+  document.addEventListener("turbo:load", bindDeclaredComponents);
+  document.addEventListener("turbo:render", bindDeclaredComponents);
+  document.addEventListener("turbo:frame-load", bindDeclaredComponents);
 
   // ─── Connection & Visit Errors ─────────────────────────────────────────────
 
@@ -706,13 +945,16 @@
         reportConnection(Boolean(detail.online), detail.error || null);
         break;
       case "navigate":
-        performNavigation(detail.action);
+        performNavigation(detail.action, detail.url);
         break;
       case "focus":
         handleFocusReturn(detail);
         break;
       case "visit":
         performVisit(detail.url);
+        break;
+      case "deep-link-pending":
+        followTheLink();
         break;
       case "file-open-pending":
         drainOpenedFiles();
@@ -733,7 +975,23 @@
    * shell before any page exists, so the page asks — on its own startup, and
    * again whenever the shell pings a running page.
    */
+  // Whether this is a page of the app, rather than the one the shell shows
+  // while the server starts. What is collected from the shell is handed over
+  // once, so it is for the app's page to collect.
+  function onTheAppsOwnPage() {
+    const server = window.__TURBO_DESKTOP_SERVER_URL__;
+    if (!server) return true;
+
+    try {
+      return new URL(server).origin === window.location.origin;
+    } catch (_e) {
+      return true;
+    }
+  }
+
   async function drainOpenedFiles() {
+    if (!onTheAppsOwnPage()) return;
+
     try {
       const result = await TurboDesktop.sendBridgeMessage(
         "file-open",
@@ -751,7 +1009,33 @@
     }
   }
 
-  drainOpenedFiles();
+  // Once the page has loaded, and not before: the file is handed over once,
+  // and the page's own scripts have to be listening when it is. They connect
+  // when the document is ready, after this script, which was there first.
+  function whenThePageHasLoaded(callback) {
+    if (document.readyState === "complete") {
+      callback();
+    } else {
+      window.addEventListener("load", callback, { once: true });
+    }
+  }
+
+  whenThePageHasLoaded(drainOpenedFiles);
+
+  // ─── A link from outside ───────────────────────────────────────────────────
+  //
+  // The shell keeps the link the app was asked to open, and this collects it.
+  // Asked for on startup too, because a link that started the app arrived
+  // before there was a page to tell.
+
+  async function followTheLink() {
+    if (!onTheAppsOwnPage()) return;
+
+    const pending = await TurboDesktop.sendBridgeMessage("deep-link", "pending", {});
+    if (pending && pending.url) performVisit(pending.url);
+  }
+
+  whenTheDocumentIsReady(followTheLink);
 
   /**
    * True when someone is part-way through entering something.
@@ -819,8 +1103,18 @@
   /**
    * Act on what the shell asked the page underneath to do after a modal closed.
    */
-  function performNavigation(action) {
+  function performNavigation(action, url) {
     switch (action) {
+      case "visit":
+        // Replacing, not advancing: the window is being brought up to date,
+        // not taken somewhere the back button should undo.
+        if (!url) return performNavigation("refresh");
+        if (window.Turbo && window.Turbo.visit) {
+          window.Turbo.visit(url, { action: "replace" });
+        } else {
+          window.location.replace(url);
+        }
+        break;
       case "back":
         window.history.back();
         break;
@@ -860,7 +1154,15 @@
   /** A visit that completed with an error status. */
   document.addEventListener("turbo:before-fetch-response", (event) => {
     const response = event.detail && event.detail.fetchResponse;
-    if (!response || response.succeeded || response.statusCode < 500) return;
+    if (!response) return;
+
+    // The server answered, so it can be reached. Nothing else takes the
+    // banner down after a single failed request: the shell reports the
+    // connection changing, and here it never changed.
+    if (response.succeeded || response.statusCode < 500) {
+      hideOfflineBanner();
+      return;
+    }
 
     reportVisitError(TurboDesktop.errors.HTTP_FAILURE, { status: response.statusCode });
   });
@@ -874,14 +1176,19 @@
 
   // ─── Initial Setup ─────────────────────────────────────────────────────────
 
-  // Sync title on initial load (before Turbo is initialized)
-  if (document.readyState === "complete" || document.readyState === "interactive") {
-    TurboDesktop.setTitle(document.title);
-  } else {
-    document.addEventListener("DOMContentLoaded", () => {
-      TurboDesktop.setTitle(document.title);
-    });
+  // The shell runs this script before anything the page loads, so that a
+  // page's own scripts find TurboDesktop already there. The document has no
+  // head, body or title at that point, so what needs them waits for them.
+  function whenTheDocumentIsReady(callback) {
+    if (document.readyState === "complete" || document.readyState === "interactive") {
+      callback();
+    } else {
+      document.addEventListener("DOMContentLoaded", callback, { once: true });
+    }
   }
+
+  // Sync title on initial load (before Turbo is initialized)
+  whenTheDocumentIsReady(() => TurboDesktop.setTitle(document.title));
 
   // Expose the API globally
   window.__TURBO_DESKTOP__ = TurboDesktop;
@@ -900,20 +1207,71 @@
   }
   TurboDesktop._inspectorEnabled = inspectorEnabled;
 
-  if (INVOKE && inspectorEnabled()) {
-    // Resolve the inspector entry URL, in priority order:
+  // Decided once the page has a head: the tag that turns the inspector on is
+  // in it.
+  // The inspector is a module. A script the shell runs before the page
+  // cannot import one, in some webviews, wherever the call comes from; the
+  // shell does the importing itself once the page has loaded, and hands the
+  // module over. Importing from here still serves a shell that injects this
+  // script the older way, after the page. Whichever gets there first starts
+  // the inspector, once.
+  let inspectorStarted = false;
+
+  function inspectorUrl() {
+    TurboDesktop._inspectorWanted = inspectorEnabled();
+    if (!INVOKE || !TurboDesktop._inspectorWanted || inspectorStarted) return null;
+
+    // In priority order:
     //   1. an explicit override global,
     //   2. the same-origin URL the Rails gem advertises on the meta tag
     //      (turbo_desktop_inspector_meta_tag → data-inspector-url), served by
-    //      the gem's engine so this import() is same-origin,
+    //      the gem's engine so the import is same-origin,
     //   3. a relative fallback for setups that serve ./inspector.js themselves.
     var inspectorMeta = document.querySelector('meta[name="turbo-desktop-inspector"]');
-    var inspectorUrl =
+    return (
       window.__TURBO_DESKTOP_INSPECTOR_URL__ ||
       (inspectorMeta && inspectorMeta.dataset && inspectorMeta.dataset.inspectorUrl) ||
-      "./inspector.js";
-    import(inspectorUrl)
-      .then(function (m) { m.startInspector(TurboDesktop, { doc: document, win: window }); })
-      .catch(function (e) { console.error("[turbo-desktop] inspector failed to load", e); });
+      "./inspector.js"
+    );
   }
+
+  function startTheInspector(module) {
+    if (inspectorStarted) return;
+
+    module.startInspector(TurboDesktop, { doc: document, win: window });
+    // Only once it has: a start that failed is worth another try.
+    inspectorStarted = true;
+    TurboDesktop._inspectorError = null;
+  }
+
+  function inspectorFailed(error) {
+    TurboDesktop._inspectorError = String((error && error.stack) || error);
+  }
+
+  function loadTheInspector() {
+    const url = inspectorUrl();
+    if (!url) return;
+
+    import(url).then(startTheInspector).catch(inspectorFailed);
+  }
+
+  TurboDesktop._inspectorUrl = inspectorUrl;
+  TurboDesktop._startInspector = startTheInspector;
+  TurboDesktop._inspectorFailed = inspectorFailed;
+  TurboDesktop._loadInspector = loadTheInspector;
+
+  whenTheDocumentIsReady(() => {
+    loadTheInspector();
+    giveTurboAWayToAsk();
+    bindDeclaredComponents();
+
+    // For a script that would rather be told than check: TurboDesktop is
+    // there before it, but the document was not.
+    TurboDesktop.ready = true;
+    document.dispatchEvent(
+      new CustomEvent("turbo-desktop:ready", {
+        detail: { version: TurboDesktop.version, platform: TurboDesktop.platform },
+      })
+    );
+  });
 })();

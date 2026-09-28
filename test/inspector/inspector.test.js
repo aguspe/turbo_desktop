@@ -64,3 +64,49 @@ describe("startInspector", () => {
     assert.equal(ctx.state.nav.presentation, "modal");
   });
 });
+
+describe("the inspector, across Turbo navigation", () => {
+  const HOST = "[data-turbo-desktop-inspector]";
+
+  it("is not inside the part of the page Turbo replaces", () => {
+    const { window, document, host } = setup();
+    startInspector(host, { doc: document, win: window });
+
+    assert.equal(document.body.querySelector(HOST), null, "mounted in the body, which Turbo swaps");
+    assert.ok(document.documentElement.querySelector(HOST));
+  });
+
+  it("is still there after Turbo has rendered another page", () => {
+    const { window, document, host } = setup();
+    startInspector(host, { doc: document, win: window });
+
+    // What a Turbo visit does.
+    const next = document.createElement("body");
+    next.innerHTML = "<h1>Tasks</h1>";
+    document.documentElement.replaceChild(next, document.body);
+    document.dispatchEvent(new window.Event("turbo:render"));
+
+    assert.equal(document.querySelectorAll(HOST).length, 1);
+  });
+
+  it("comes back if something takes it out of the page", () => {
+    const { window, document, host } = setup();
+    const { panel } = startInspector(host, { doc: document, win: window });
+
+    panel.hostEl.remove();
+    document.dispatchEvent(new window.Event("turbo:load"));
+
+    assert.equal(document.querySelectorAll(HOST).length, 1);
+  });
+
+  it("stays open across a visit if it was open", () => {
+    const { window, document, host } = setup();
+    const { panel } = startInspector(host, { doc: document, win: window });
+    panel.show();
+
+    panel.hostEl.remove();
+    document.dispatchEvent(new window.Event("turbo:load"));
+
+    assert.equal(document.querySelector(HOST).style.display, "block");
+  });
+});

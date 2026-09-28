@@ -1,19 +1,21 @@
 # Releasing Turbo Desktop
 
-A release reaches five places. A tag alone reaches one of them: 0.2.1 was tagged
+A release reaches six places. A tag alone reaches one of them: 0.2.1 was tagged
 and announced, and never arrived on RubyGems or npm.
 
 Every part of a release carries the same version. The example below releases
-v0.2.3.
+v0.2.4.
 
 ## 1. Bump the version everywhere
 
 | File | Field |
 |---|---|
-| `package.json`, `package-lock.json` | `version` (`npm version 0.2.3 --no-git-tag-version` does both) |
+| `package.json`, `package-lock.json` | `version` (`npm version 0.2.4 --no-git-tag-version` does both) |
 | `src-tauri/Cargo.toml` | `version`; then `cargo check` to update `Cargo.lock` |
 | `src-tauri/tauri.conf.json` | `version` |
 | `src/turbo-desktop.js` | `version` |
+| `packages/bridge/package.json` | `version` (`npm version 0.2.4 --no-git-tag-version` inside `packages/bridge`) |
+| `packages/bridge/turbo-desktop.d.ts` | a copy of `src/turbo-desktop.d.ts`; copy it again if the types changed |
 | `turbo_desktop-rails/lib/turbo_desktop/version.rb` | `VERSION`; then `bundle install` to update `Gemfile.lock` |
 | `turbo_desktop-rails/CHANGELOG.md` | a new entry |
 | `README.md`, `turbo_desktop-rails/README.md`, `docs/*.md`, `docs/index.html`, `site/index.html` | quoted versions |
@@ -29,8 +31,8 @@ Open a pull request, wait for CI to pass, merge to `main`.
 
 ```bash
 git switch main && git pull --ff-only
-git tag v0.2.3
-git push origin v0.2.3
+git tag v0.2.4
+git push origin v0.2.4
 ```
 
 The release workflow builds the installers and attaches them to a **draft**
@@ -42,8 +44,8 @@ than one draft for the tag, keep one and delete the rest.
 ```bash
 cd turbo_desktop-rails
 gem build turbo_desktop-rails.gemspec
-gem push turbo_desktop-rails-0.2.3.gem   # asks for a one-time password
-rm turbo_desktop-rails-0.2.3.gem
+gem push turbo_desktop-rails-0.2.4.gem   # asks for a one-time password
+rm turbo_desktop-rails-0.2.4.gem
 ```
 
 ## 5. Publish the npm package
@@ -54,6 +56,15 @@ npm pack --dry-run    # check the file list
 npm publish
 ```
 
+The typed bridge package is published from its own directory:
+
+```bash
+cd packages/bridge
+npm pack --dry-run    # turbo-desktop.d.ts must be in the list
+npm publish
+cd ../..
+```
+
 A published version cannot be replaced, and a yanked or unpublished number
 cannot be used again. A mistake is fixed by the next version.
 
@@ -62,13 +73,14 @@ cannot be used again. A mistake is fixed by the next version.
 ```bash
 gem search -r -e turbo_desktop-rails
 npm view turbo-desktop version
+npm view turbo-desktop-bridge version
 ```
 
 Then scaffold an app from the registry, outside this checkout, and confirm it
 resolves to the new gem:
 
 ```bash
-cd "$(mktemp -d)" && npx --yes turbo-desktop@0.2.3 new scratch_app
+cd "$(mktemp -d)" && npx --yes turbo-desktop@0.2.4 new scratch_app
 grep "turbo_desktop-rails (" scratch_app/Gemfile.lock
 ```
 
