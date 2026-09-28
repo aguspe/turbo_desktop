@@ -258,24 +258,32 @@ mod tests {
     // macOS hands a file opened with the app to the same place as a link, as
     // a file: URL. Read as a link, its path became a page of the app:
     // GET /Users/someone/Desktop/tasks.csv.
+    /// A path of the kind this platform has, in a folder with a space in it.
+    fn somewhere(name: &str) -> std::path::PathBuf {
+        let folder = if cfg!(windows) {
+            r"C:\Users\someone\My Tasks"
+        } else {
+            "/Users/someone/My Tasks"
+        };
+        std::path::Path::new(folder).join(name)
+    }
+
     #[test]
     fn a_file_is_a_file_and_not_a_link() {
-        let opened = url::Url::parse("file:///Users/someone/Desktop/tasks.csv").unwrap();
+        let path = somewhere("tasks.csv");
+        let opened = url::Url::from_file_path(&path).unwrap();
 
-        assert_eq!(
-            opened_file(&opened),
-            Some(std::path::PathBuf::from("/Users/someone/Desktop/tasks.csv"))
-        );
+        assert_eq!(opened.scheme(), "file");
+        assert_eq!(opened_file(&opened), Some(path));
     }
 
     #[test]
     fn a_file_with_spaces_in_its_name_is_still_that_file() {
-        let opened = url::Url::parse("file:///Users/someone/My%20Tasks/to%20do.csv").unwrap();
+        let path = somewhere("to do.csv");
+        let opened = url::Url::from_file_path(&path).unwrap();
 
-        assert_eq!(
-            opened_file(&opened),
-            Some(std::path::PathBuf::from("/Users/someone/My Tasks/to do.csv"))
-        );
+        assert!(opened.as_str().contains("to%20do.csv"));
+        assert_eq!(opened_file(&opened), Some(path));
     }
 
     #[test]
@@ -287,7 +295,7 @@ mod tests {
 
     #[test]
     fn a_file_is_never_followed_as_a_link() {
-        let opened = url::Url::parse("file:///Users/someone/Desktop/tasks.csv").unwrap();
+        let opened = url::Url::from_file_path(somewhere("tasks.csv")).unwrap();
 
         assert!(resolve("http://localhost:3000", &opened).is_err());
     }
