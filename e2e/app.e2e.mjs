@@ -101,6 +101,17 @@ async function click(id) {
   await link.click();
 }
 
+/**
+ * Click something that takes its window away with it. The click may never be
+ * answered, so its failure says nothing; that the thing was there to click
+ * is waited for first, or a click made too early goes unnoticed.
+ */
+async function clickAndLeave(id) {
+  const element = await browser.$(`#${id}`);
+  await element.waitForExist({ timeout: 10000 });
+  await element.click().catch(() => {});
+}
+
 async function windows() {
   return browser.getWindowHandles();
 }
@@ -392,8 +403,7 @@ test("saving a form in a modal closes it and shows the result underneath", async
   await browser.switchToWindow(await otherWindow());
   await waitFor(bridgeReady, { label: "the bridge in the modal" });
   await (await browser.$("#title")).setValue("Record the demo");
-  // The window closes under the click, so the click itself may not return.
-  await (await browser.$("#save")).click().catch(() => {});
+  await clickAndLeave("save");
 
   await onlyMainIsOpen();
   await waitFor(async () => (await (await browser.$("#count")).getText()) !== before, {
@@ -409,7 +419,7 @@ test("leaving a modal by a link to an ordinary page closes it", async () => {
   await browser.switchToWindow(await otherWindow());
   await waitFor(bridgeReady, { label: "the bridge in the modal" });
 
-  await (await browser.$("#cancel")).click().catch(() => {});
+  await clickAndLeave("cancel");
 
   await onlyMainIsOpen();
   await waitFor(async () => (await path()) === "/tasks", {

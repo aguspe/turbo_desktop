@@ -222,17 +222,10 @@ pub fn drain_pending(app: &tauri::AppHandle) -> Vec<String> {
 
 /// The paths the OS launched the app with, on platforms where an associated
 /// file arrives as a plain argument (Windows and Linux; macOS uses an event).
-pub fn paths_from_args<I: Iterator<Item = String>>(args: I) -> Vec<std::path::PathBuf> {
-    args.skip(1)
-        .filter(|arg| !arg.starts_with('-'))
-        .map(std::path::PathBuf::from)
-        .filter(|path| path.exists())
-        .collect()
-}
-
-/// The same, for a launch from somewhere else: a path that is not absolute is
-/// taken from the directory the launch was made in, which for a second copy
-/// of the app is not the directory this one is running in.
+///
+/// A path that is not absolute is taken from the directory the launch was
+/// made in, which for a second copy of the app is not the directory this one
+/// is running in.
 pub fn paths_from_launch<I: Iterator<Item = String>>(
     args: I,
     directory: &std::path::Path,
@@ -396,7 +389,10 @@ mod tests {
             "/nonexistent/other.txt".to_string(),
         ];
 
-        assert_eq!(paths_from_args(args.into_iter()), vec![file.clone()]);
+        assert_eq!(
+            paths_from_launch(args.into_iter(), std::path::Path::new("/")),
+            vec![file.clone()]
+        );
         std::fs::remove_file(&file).ok();
     }
 
