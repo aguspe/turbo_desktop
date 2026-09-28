@@ -11,7 +11,7 @@ import {
   desktopPackage,
   urlScheme,
   defaultBuildTarget,
-  defaultUserAgent,
+  appConfig,
   extractIconFlag,
   gemConstraint,
   guessAppName,
@@ -56,17 +56,16 @@ test("defaultBuildTarget matches the host platform", () => {
   if (process.platform === "win32") assert.ok(target.endsWith("-pc-windows-msvc"));
 });
 
-test("defaultUserAgent reports the running version and platform", () => {
-  const ua = defaultUserAgent();
+test("a scaffolded app leaves the user agent to the shell", () => {
+  // The shell names the machine it is running on. A user agent written at
+  // scaffold time named the machine the scaffold ran on, in every build: an
+  // app made on a Mac told Rails it was on macOS when it ran on Windows.
+  const config = appConfig("Task Manager");
 
-  assert.ok(
-    ua.startsWith(`Turbo Desktop/${packageVersion()}`),
-    `user agent should carry the package version, got: ${ua}`
-  );
-  assert.doesNotMatch(ua, /undefined/);
-
-  if (process.platform === "darwin") assert.match(ua, /\(macOS; /);
-  if (process.platform === "linux") assert.match(ua, /\(Linux; /);
+  assert.equal(config.app_name, "Task Manager");
+  assert.ok(!("user_agent" in config), "the scaffold should not fix the user agent");
+  assert.equal(config.server.command, "bin/rails server");
+  assert.equal(config.sudo.enabled, false);
 });
 
 test("run passes arguments through without a shell", () => {
