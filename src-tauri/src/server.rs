@@ -8,6 +8,7 @@
 //! connection monitor moves the window off the waiting page once the server
 //! answers. This only decides whether to start one and does so.
 
+use crate::connection::Liveness;
 use crate::window::ServerConfig;
 use std::path::{Path, PathBuf};
 
@@ -15,21 +16,25 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Decision {
     Start,
-    /// Something is already listening — very likely a server the developer is
+    /// This app's server is already answering — very likely one the developer is
     /// running themselves, which we must not duplicate or later kill.
     AlreadyRunning,
+    /// Something holds the port but does not answer as this app. Starting ours
+    /// could only fail to bind, so this is reported rather than retried.
+    PortHeldByAnotherApp,
     /// No command configured, so the app expects a server it does not own.
     NotConfigured,
 }
 
-pub fn decide(config: &ServerConfig, reachable: bool) -> Decision {
+pub fn decide(config: &ServerConfig, liveness: Liveness) -> Decision {
     if config.command.as_deref().unwrap_or("").trim().is_empty() {
         return Decision::NotConfigured;
     }
-    if reachable {
-        return Decision::AlreadyRunning;
+    match liveness {
+        Liveness::Absent => Decision::Start,
+        Liveness::Ours => Decision::AlreadyRunning,
+        Liveness::Foreign => Decision::PortHeldByAnotherApp,
     }
-    Decision::Start
 }
 
 /// Where the command runs, resolved against the directory the config was read from.
@@ -157,7 +162,7 @@ mod tests {
     #[test]
     fn nothing_to_start_without_a_command() {
         assert_eq!(
-            decide(&ServerConfig::default(), false),
+            decide(&ServerConfig::default(), Liveness::Absent),
             Decision::NotConfigured
         );
         assert_eq!(
@@ -166,7 +171,7 @@ mod tests {
                     command: Some("   ".into()),
                     directory: None
                 },
-                false
+                Liveness::Absent
             ),
             Decision::NotConfigured
         );
@@ -174,14 +179,27 @@ mod tests {
 
     #[test]
     fn starts_when_nothing_is_listening() {
-        assert_eq!(decide(&configured(), false), Decision::Start);
+        assert_eq!(decide(&configured(), Liveness::Absent), Decision::Start);
     }
 
     #[test]
-    fn leaves_a_server_someone_else_is_running_alone() {
+    fn leaves_our_own_server_alone() {
         // Starting a second one would fail on the port, and quitting the app
         // would kill a server the developer started by hand.
-        assert_eq!(decide(&configured(), true), Decision::AlreadyRunning);
+        assert_eq!(
+            decide(&configured(), Liveness::Ours),
+            Decision::AlreadyRunning
+        );
+    }
+
+    #[test]
+    fn reports_a_port_held_by_a_different_app() {
+        // The failure this prevents: a second Rails app on 3000 was silently
+        // adopted, so the desktop app opened someone else's project.
+        assert_eq!(
+            decide(&configured(), Liveness::Foreign),
+            Decision::PortHeldByAnotherApp
+        );
     }
 
     #[test]

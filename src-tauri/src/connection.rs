@@ -120,6 +120,44 @@ pub fn server_is_reachable(url: &url::Url) -> bool {
     }
 }
 
+/// Who, if anyone, is answering at the app's address.
+///
+/// A TCP connect only proves *something* accepted. On a machine with more than
+/// one Rails app, port 3000 is very often held by a different one, and a bare
+/// probe cannot tell them apart — so the shell would skip starting the app's
+/// own server and then open whatever is there instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Liveness {
+    /// Nothing accepted the connection.
+    Absent,
+    /// Something is listening, but it does not answer as this app.
+    Foreign,
+    /// This app's server answered.
+    Ours,
+}
+
+/// Probe the app's address and say whose server is there.
+///
+/// Identity is the path-configuration endpoint the shell already depends on: a
+/// server that answers it with rules this shell can parse is this app's own. No
+/// new contract is introduced — this asks, at startup, the same question the
+/// background fetch asks a moment later.
+pub async fn server_liveness(url: &url::Url, path_config_url: &str, user_agent: &str) -> Liveness {
+    let probe_url = url.clone();
+    let accepted = tokio::task::spawn_blocking(move || server_is_reachable(&probe_url))
+        .await
+        .unwrap_or(false);
+
+    if !accepted {
+        return Liveness::Absent;
+    }
+
+    match crate::config::fetch_path_configuration(path_config_url, user_agent).await {
+        Ok(_) => Liveness::Ours,
+        Err(_) => Liveness::Foreign,
+    }
+}
+
 /// Try the app again now, rather than waiting for the next scheduled probe.
 ///
 /// This is what the error page's retry button calls — the desktop counterpart of
@@ -159,6 +197,84 @@ pub async fn retry_connection(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A listener bound and immediately released, so the port is free again.
+    fn free_port() -> u16 {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.local_addr().unwrap().port()
+    }
+
+    /// A listener that accepts and hangs up without speaking HTTP — the shape of
+    /// a stray process, or a server of some other kind, sitting on the port.
+    fn silent_listener() -> u16 {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                drop(stream);
+            }
+        });
+        port
+    }
+
+    /// A listener that answers the path-configuration request the way the Rails
+    /// engine does.
+    fn path_configuration_listener() -> u16 {
+        use std::io::{Read, Write};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for mut stream in listener.incoming().flatten() {
+                let mut buffer = [0u8; 1024];
+                let _ = stream.read(&mut buffer);
+                let body = r#"{"rules":[]}"#;
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+            }
+        });
+        port
+    }
+
+    fn urls(port: u16) -> (url::Url, String) {
+        (
+            format!("http://127.0.0.1:{port}/").parse().unwrap(),
+            format!("http://127.0.0.1:{port}/turbo-desktop/path-configuration.json"),
+        )
+    }
+
+    #[tokio::test]
+    async fn an_unused_port_has_nothing_on_it() {
+        let (url, path_config) = urls(free_port());
+        assert_eq!(
+            server_liveness(&url, &path_config, "test").await,
+            Liveness::Absent
+        );
+    }
+
+    #[tokio::test]
+    async fn a_listener_that_is_not_this_app_is_foreign() {
+        // The case this exists for: a second Rails app already on the port. A
+        // plain connect calls this reachable, and the shell would open it.
+        let (url, path_config) = urls(silent_listener());
+        assert_eq!(
+            server_liveness(&url, &path_config, "test").await,
+            Liveness::Foreign
+        );
+    }
+
+    #[tokio::test]
+    async fn a_server_answering_with_path_configuration_is_ours() {
+        let (url, path_config) = urls(path_configuration_listener());
+        assert_eq!(
+            server_liveness(&url, &path_config, "test").await,
+            Liveness::Ours
+        );
+    }
 
     #[test]
     fn a_single_failure_is_not_enough_to_go_offline() {

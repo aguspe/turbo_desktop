@@ -215,10 +215,18 @@ fn main() {
             // app opens on its own rather than waiting for someone to run the
             // server by hand. The waiting page and the connection monitor take it
             // from here: the window moves to the app as soon as it answers.
-            let mut reachable_at_startup = connection::server_is_reachable(&url);
+            // Ask whose server is there, not merely whether something answers:
+            // a different Rails app on the same port would otherwise be adopted
+            // silently, and the window would open on someone else's project.
+            let liveness = tauri::async_runtime::block_on(connection::server_liveness(
+                &url,
+                &path_config_url,
+                &user_agent,
+            ));
+            let mut reachable_at_startup = liveness != connection::Liveness::Absent;
             let config_dir = loaded.source.as_deref().and_then(|p| p.parent());
 
-            match server::decide(&shell_defaults.server, reachable_at_startup) {
+            match server::decide(&shell_defaults.server, liveness) {
                 server::Decision::Start => {
                     let handle = app.handle().clone();
                     let server_config = shell_defaults.server.clone();
@@ -237,6 +245,15 @@ fn main() {
                 }
                 server::Decision::AlreadyRunning => {
                     log::info!("A server is already answering; leaving it alone")
+                }
+                server::Decision::PortHeldByAnotherApp => {
+                    log::warn!(
+                        "Something is listening at {} but it does not answer as this app. \
+                         Not starting the app server: the port is already taken. \
+                         Stop whatever is using it, or set a different server_url in {}.",
+                        url,
+                        window::CONFIG_FILENAME
+                    );
                 }
                 server::Decision::NotConfigured => {}
             }
