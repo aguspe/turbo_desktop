@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.4 (2026-09-27)
+## 0.2.4 (2026-09-28)
 
 Version aligned with the desktop shell's 0.2.4 release. In the gem, the Dev
 Inspector's scripts are served so that an upgrade takes effect at once. What
