@@ -5,8 +5,8 @@ class ViewHelpersTestHost
 
   attr_reader :request
 
-  def initialize(user_agent)
-    @request = StubRequest.new(user_agent)
+  def initialize(user_agent, path: "/")
+    @request = StubRequest.new(user_agent, path: path)
   end
 
   # Stub capture for turbo_desktop_only / turbo_web_only
@@ -200,5 +200,75 @@ class ViewHelpersTest < Minitest::Test
   def test_inspector_meta_tag_absent_when_disabled
     host = ViewHelpersTestHost.new(DESKTOP_UA)
     assert_nil host.turbo_desktop_inspector_meta_tag
+  end
+end
+
+# A page shown in a modal is a page with a window of its own around it. The
+# app's navigation does not belong in it, and the view has to be able to tell.
+class PresentationHelpersTest < Minitest::Test
+  DESKTOP_UA = "Turbo Desktop/0.2.4 (macOS; aarch64)"
+  BROWSER_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+
+  def setup
+    super
+    TurboDesktop.configure do |config|
+      config.path_configuration = {
+        rules: [
+          { patterns: [ "/" ], properties: { presentation: "default" } },
+          { patterns: [ "/new$", "/edit$" ], properties: { presentation: "modal" } },
+          { patterns: [ "/reports/" ], properties: { presentation: "new_window" } },
+          { patterns: [ "/reports/new$" ], properties: { presentation: "modal" } }
+        ]
+      }
+    end
+  end
+
+  def host(path, user_agent = DESKTOP_UA)
+    ViewHelpersTestHost.new(user_agent, path: path)
+  end
+
+  def test_a_page_whose_rule_is_modal_is_shown_in_a_modal
+    assert host("/tasks/new").turbo_desktop_modal?
+    assert host("/tasks/12/edit").turbo_desktop_modal?
+    assert_equal "modal", host("/tasks/new").turbo_desktop_presentation
+  end
+
+  def test_an_ordinary_page_is_not
+    refute host("/tasks").turbo_desktop_modal?
+    assert_equal "default", host("/tasks").turbo_desktop_presentation
+    assert_equal "new_window", host("/reports/3").turbo_desktop_presentation
+  end
+
+  def test_the_last_rule_that_matches_decides_as_it_does_in_the_shell
+    assert host("/reports/new").turbo_desktop_modal?
+  end
+
+  def test_a_browser_shows_no_page_in_a_modal
+    refute host("/tasks/new", BROWSER_UA).turbo_desktop_modal?
+    assert_nil host("/tasks/new", BROWSER_UA).turbo_desktop_presentation
+  end
+
+  def test_a_rule_that_is_not_a_pattern_is_passed_over
+    TurboDesktop.configure do |config|
+      config.path_configuration = {
+        rules: [
+          { patterns: [ "[" ], properties: { presentation: "modal" } },
+          { patterns: [ "/new$" ], properties: { presentation: "modal" } }
+        ]
+      }
+    end
+
+    assert host("/tasks/new").turbo_desktop_modal?
+    refute host("/tasks").turbo_desktop_modal?
+  end
+
+  def test_rules_written_with_strings_for_keys_are_read_the_same
+    TurboDesktop.configure do |config|
+      config.path_configuration = {
+        "rules" => [ { "patterns" => [ "/new$" ], "properties" => { "presentation" => "modal" } } ]
+      }
+    end
+
+    assert host("/tasks/new").turbo_desktop_modal?
   end
 end

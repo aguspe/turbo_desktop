@@ -317,7 +317,8 @@ A component that cannot do its job on the machine it is running on (no
 notification service, a shortcut another application holds) answers with
 `status: "unavailable"` and the reason, rather than failing.
 
-Menu items a page registers go into an **Actions** menu, and choosing one
+Menu items a page registers go into an **Actions** menu at the end of the
+menu bar, which is there while it has something in it, and choosing one
 sends `{ event: "clicked", data: { id } }` to the `menu-item` component. A
 global shortcut sends `{ event: "triggered", data: { id, accelerator } }` to
 the `shortcut` component, whether or not the app is in front:
@@ -362,6 +363,17 @@ not a modal's page, so the modal closes and the window underneath goes there,
 showing what was saved. The same happens for a link in a modal to any page
 whose rule is not `modal`. Nothing has to be written for this: it is what
 Hotwire Native does, and it follows from the path configuration.
+
+A page rendered for a modal has a window of its own around it, so the app's
+navigation does not belong in it. The gem can tell from the path
+configuration:
+
+```erb
+<%= render "navigation" unless turbo_desktop_modal? %>
+```
+
+`turbo_desktop_presentation` gives the presentation itself: `"default"`,
+`"modal"`, `"new_window"`. Both are nil or false in a browser.
 
 #### Dismissing a modal
 
@@ -676,6 +688,9 @@ your app for them — double-click, "Open With…", drop on the dock icon:
   }
 }
 ```
+
+macOS reports an opened file as a file and as a `file:` URL; it is opened
+once, and is never taken for a link to a page.
 
 Opened files arrive as a `turbo-desktop:file-open` DOM event with
 `event.detail.paths`, whether the app was already running or was launched by

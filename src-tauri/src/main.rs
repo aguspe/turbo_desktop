@@ -77,6 +77,7 @@ fn main() {
                 .build(),
         )
         .manage(bridge::RegisteredShortcuts::default())
+        .manage(bridge::BridgeMenuItems::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_autostart::init(
@@ -90,6 +91,7 @@ fn main() {
         .manage(security::UserGrants::default())
         .manage(deep_link::PendingOpenedFiles::default())
         .manage(deep_link::PendingLink::default())
+        .manage(deep_link::RecentlyOpened::default())
         // Files dragged from the Finder/Explorer onto any window reach the web
         // layer as bridge events, with their paths granted for the session.
         .on_window_event(|window, event| {

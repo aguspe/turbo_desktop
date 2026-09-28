@@ -18,7 +18,22 @@ use tauri::Manager;
 /// and `your-app:/orders/123` both mean `/orders/123`. The result is resolved
 /// against the configured server and rejected if it lands anywhere else — a
 /// link arrives from outside the app, so it is not trusted to say where to go.
+/// The file a URL names, when it names one.
+///
+/// macOS hands a file opened with the app to the same place as a link, as a
+/// `file:` URL. It is a file to open, not a page to visit.
+pub fn opened_file(link: &url::Url) -> Option<std::path::PathBuf> {
+    if link.scheme() != "file" {
+        return None;
+    }
+    link.to_file_path().ok()
+}
+
 pub fn resolve(server_url: &str, link: &url::Url) -> Result<url::Url, String> {
+    if link.scheme() == "file" {
+        return Err(format!("Refused: '{}' is a file, not a link", link));
+    }
+
     let server: url::Url = server_url
         .parse()
         .map_err(|e| format!("Invalid server URL: {}", e))?;
@@ -79,7 +94,12 @@ impl PendingLink {
 pub fn handle(app: &tauri::AppHandle, urls: Vec<url::Url>) {
     let config = app.state::<crate::window::TurboDesktopConfig>();
 
-    for link in urls {
+    let files: Vec<std::path::PathBuf> = urls.iter().filter_map(opened_file).collect();
+    if !files.is_empty() {
+        handle_files(app, files);
+    }
+
+    for link in urls.into_iter().filter(|link| opened_file(link).is_none()) {
         log::info!("Deep link: {}", link);
 
         let target = match resolve(&config.server_url, &link) {
@@ -113,6 +133,27 @@ pub fn handle(app: &tauri::AppHandle, urls: Vec<url::Url>) {
 #[derive(Default)]
 pub struct PendingOpenedFiles(std::sync::Mutex<Vec<String>>);
 
+/// The files opened in the last moment, so that one reported twice is opened
+/// once. macOS reports an opened file as a file and as a URL.
+#[derive(Default)]
+pub struct RecentlyOpened(std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>>);
+
+impl RecentlyOpened {
+    const MOMENT: std::time::Duration = std::time::Duration::from_secs(2);
+
+    /// True the first time a path is seen, and again once a moment has passed.
+    pub fn is_new(&self, path: &str, now: std::time::Instant) -> bool {
+        let mut seen = self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        seen.retain(|_, at| now.saturating_duration_since(*at) < Self::MOMENT);
+
+        if seen.contains_key(path) {
+            return false;
+        }
+        seen.insert(path.to_string(), now);
+        true
+    }
+}
+
 /// Handle files the OS handed to the app — a double-click on an associated
 /// type, "Open With…", or a file dropped on the app's icon.
 pub fn handle_files(app: &tauri::AppHandle, paths: Vec<std::path::PathBuf>) {
@@ -124,8 +165,14 @@ pub fn handle_files(app: &tauri::AppHandle, paths: Vec<std::path::PathBuf>) {
     // dialog, so the page can read what it was handed.
     let grants = app.state::<crate::security::UserGrants>();
     let mut opened: Vec<String> = Vec::new();
+    let recent = app.state::<RecentlyOpened>();
+    let now = std::time::Instant::now();
+
     for path in &paths {
         let raw = path.to_string_lossy().into_owned();
+        if !recent.is_new(&raw, now) {
+            continue;
+        }
         if path.is_dir() {
             grants.grant_folder(&raw);
         } else {
@@ -133,6 +180,10 @@ pub fn handle_files(app: &tauri::AppHandle, paths: Vec<std::path::PathBuf>) {
         }
         log::info!("Opening from the OS: {}", raw);
         opened.push(raw);
+    }
+
+    if opened.is_empty() {
+        return;
     }
 
     app.state::<PendingOpenedFiles>()
@@ -174,6 +225,72 @@ pub fn paths_from_args<I: Iterator<Item = String>>(args: I) -> Vec<std::path::Pa
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // macOS tells the app about an opened file twice over: as a file to
+    // open, and as a URL. It is one file, opened once.
+    #[test]
+    fn a_file_reported_twice_is_opened_once() {
+        let recent = RecentlyOpened::default();
+        let now = std::time::Instant::now();
+
+        assert!(recent.is_new("/tmp/tasks.csv", now));
+        assert!(!recent.is_new("/tmp/tasks.csv", now + std::time::Duration::from_millis(300)));
+    }
+
+    #[test]
+    fn a_file_opened_again_later_is_opened_again() {
+        let recent = RecentlyOpened::default();
+        let now = std::time::Instant::now();
+
+        assert!(recent.is_new("/tmp/tasks.csv", now));
+        assert!(recent.is_new("/tmp/tasks.csv", now + std::time::Duration::from_secs(5)));
+    }
+
+    #[test]
+    fn another_file_is_another_file() {
+        let recent = RecentlyOpened::default();
+        let now = std::time::Instant::now();
+
+        assert!(recent.is_new("/tmp/tasks.csv", now));
+        assert!(recent.is_new("/tmp/more.csv", now));
+    }
+
+    // macOS hands a file opened with the app to the same place as a link, as
+    // a file: URL. Read as a link, its path became a page of the app:
+    // GET /Users/someone/Desktop/tasks.csv.
+    #[test]
+    fn a_file_is_a_file_and_not_a_link() {
+        let opened = url::Url::parse("file:///Users/someone/Desktop/tasks.csv").unwrap();
+
+        assert_eq!(
+            opened_file(&opened),
+            Some(std::path::PathBuf::from("/Users/someone/Desktop/tasks.csv"))
+        );
+    }
+
+    #[test]
+    fn a_file_with_spaces_in_its_name_is_still_that_file() {
+        let opened = url::Url::parse("file:///Users/someone/My%20Tasks/to%20do.csv").unwrap();
+
+        assert_eq!(
+            opened_file(&opened),
+            Some(std::path::PathBuf::from("/Users/someone/My Tasks/to do.csv"))
+        );
+    }
+
+    #[test]
+    fn a_link_is_not_a_file() {
+        let link = url::Url::parse("task-manager://orders/123").unwrap();
+
+        assert_eq!(opened_file(&link), None);
+    }
+
+    #[test]
+    fn a_file_is_never_followed_as_a_link() {
+        let opened = url::Url::parse("file:///Users/someone/Desktop/tasks.csv").unwrap();
+
+        assert!(resolve("http://localhost:3000", &opened).is_err());
+    }
 
     // A link that starts the app arrives before there is a page to give it
     // to. It was handed to the empty window and lost.

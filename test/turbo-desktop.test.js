@@ -1449,6 +1449,38 @@ describe("a modal that moves on to an ordinary page", () => {
     assertDeepEqual(visits, [], "the modal went to the list itself");
   });
 
+  // A saved form's modal went on showing its form for as long as the shell
+  // took to answer, and whatever the page did meanwhile, then closed. It has
+  // nothing more to show once it is on its way somewhere.
+  it("shows nothing while the shell decides", async () => {
+    const { window } = inAModal({ action: "advance", presentation: "default" });
+
+    propose(window, "https://myapp.test/tasks");
+
+    assert.equal(window.document.documentElement.style.visibility, "hidden");
+  });
+
+  it("shows itself again when it turns out to be staying", async () => {
+    const { window } = inAModal({ action: "none", presentation: "modal" });
+
+    propose(window, "https://myapp.test/tasks/1/edit");
+    await tick();
+
+    assert.equal(window.document.documentElement.style.visibility, "");
+  });
+
+  it("does not blank the main window, which is going nowhere", async () => {
+    const { window } = createEnvironment({
+      invoke: (cmd) =>
+        cmd === "handle_visit_proposal" ? { action: "advance", presentation: "default" } : undefined,
+    });
+    window.Turbo = { visit() {} };
+
+    propose(window, "https://myapp.test/tasks");
+
+    assert.equal(window.document.documentElement.style.visibility, "");
+  });
+
   it("stays open for a page that is a modal's own", async () => {
     const { window, calls } = inAModal({ action: "none", presentation: "modal" });
 

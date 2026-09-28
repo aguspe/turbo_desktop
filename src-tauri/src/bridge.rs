@@ -259,31 +259,116 @@ pub fn bridge_item_for_menu_event(event_id: &str) -> Option<&str> {
         .filter(|name| !name.is_empty())
 }
 
-fn bridge_submenu(app: &tauri::AppHandle) -> Result<tauri::menu::Submenu<tauri::Wry>, String> {
+/// A menu item a page has asked for.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MenuEntry {
+    pub id: String,
+    pub title: String,
+    pub shortcut: Option<String>,
+}
+
+/// The menu items pages have asked for, in the order they asked.
+///
+/// The Actions menu is built from these each time they change, and the menu
+/// bar set again. An item added to a menu already in the menu bar was shown
+/// there and could not be chosen with the mouse, and an Actions menu whose
+/// last item had gone stayed behind, empty.
+#[derive(Default)]
+pub struct BridgeMenuItems(std::sync::Mutex<Vec<MenuEntry>>);
+
+impl BridgeMenuItems {
+    fn entries(&self) -> std::sync::MutexGuard<'_, Vec<MenuEntry>> {
+        self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Add an item, or replace the one with that id where it stands.
+    pub fn add(&self, id: &str, title: &str, shortcut: Option<&str>) {
+        let entry = MenuEntry {
+            id: id.to_string(),
+            title: title.to_string(),
+            shortcut: shortcut.map(str::to_string),
+        };
+
+        let mut entries = self.entries();
+        match entries.iter_mut().find(|existing| existing.id == id) {
+            Some(existing) => *existing = entry,
+            None => entries.push(entry),
+        }
+    }
+
+    /// Take an item away. False when it was not there.
+    pub fn remove(&self, id: &str) -> bool {
+        let mut entries = self.entries();
+        let before = entries.len();
+        entries.retain(|entry| entry.id != id);
+        entries.len() != before
+    }
+
+    pub fn all(&self) -> Vec<MenuEntry> {
+        self.entries().clone()
+    }
+}
+
+/// Put the Actions menu in the menu bar as the pages have asked for it, or
+/// take it out when they have asked for nothing.
+fn show_bridge_menu(app: &tauri::AppHandle) -> Result<(), String> {
+    use tauri::Manager;
+
     let menu = app
         .menu()
         .ok_or_else(|| "The app has no menu bar".to_string())?;
 
-    if let Some(existing) = menu.get(BRIDGE_MENU_ID).and_then(|kind| kind.as_submenu().cloned()) {
-        return Ok(existing);
+    if let Some(existing) = menu.get(BRIDGE_MENU_ID) {
+        if let Some(submenu) = existing.as_submenu() {
+            menu.remove(submenu)
+                .map_err(|e| format!("Could not take the Actions menu out: {}", e))?;
+        }
     }
 
-    let submenu = tauri::menu::SubmenuBuilder::with_id(app, BRIDGE_MENU_ID, "Actions")
-        .build()
-        .map_err(|e| format!("Could not create the Actions menu: {}", e))?;
-    menu.append(&submenu)
-        .map_err(|e| format!("Could not add the Actions menu: {}", e))?;
+    let entries = app.state::<BridgeMenuItems>().all();
+    if !entries.is_empty() {
+        let mut actions = tauri::menu::SubmenuBuilder::with_id(app, BRIDGE_MENU_ID, "Actions");
+        for entry in &entries {
+            let mut item = tauri::menu::MenuItemBuilder::with_id(
+                format!("{BRIDGE_ITEM_PREFIX}{}", entry.id),
+                &entry.title,
+            );
+            if let Some(shortcut) = &entry.shortcut {
+                item = item.accelerator(shortcut);
+            }
+            let item = item
+                .build(app)
+                .map_err(|e| format!("Could not create '{}': {}", entry.title, e))?;
+            actions = actions.item(&item);
+        }
 
-    Ok(submenu)
+        let actions = actions
+            .build()
+            .map_err(|e| format!("Could not create the Actions menu: {}", e))?;
+        menu.append(&actions)
+            .map_err(|e| format!("Could not add the Actions menu: {}", e))?;
+    }
+
+    // Set again, so the menu bar is what was just built. Changing a menu
+    // that is already there is not enough on every platform.
+    app.set_menu(menu)
+        .map_err(|e| format!("Could not set the menu bar: {}", e))?;
+
+    Ok(())
 }
 
 async fn handle_menu_item(
     app: &tauri::AppHandle,
     message: &BridgeMessage,
 ) -> Result<serde_json::Value, String> {
+    use tauri::Manager;
+
+    let named = menu_item_id(&message.data);
+    let name = named.as_deref().and_then(bridge_item_for_menu_event);
+
     match message.event.as_str() {
         "connect" | "register" => {
-            let Some(id) = menu_item_id(&message.data) else {
+            let Some(name) = name else {
                 // A component connecting with nothing to register yet.
                 return Ok(serde_json::json!({ "status": "ignored" }));
             };
@@ -291,52 +376,34 @@ async fn handle_menu_item(
                 .as_str()
                 .map(str::trim)
                 .filter(|title| !title.is_empty())
-                .unwrap_or_else(|| bridge_item_for_menu_event(&id).unwrap_or("Menu Item"));
+                .unwrap_or(name);
+            let shortcut = message.data["shortcut"]
+                .as_str()
+                .map(str::trim)
+                .filter(|shortcut| !shortcut.is_empty());
 
-            let submenu = bridge_submenu(app)?;
-            if let Some(existing) = submenu.get(&id) {
-                let _ = submenu.remove(&existing);
-            }
-
-            let mut item = tauri::menu::MenuItemBuilder::with_id(id.clone(), title);
-            if let Some(shortcut) = message.data["shortcut"].as_str().filter(|s| !s.is_empty()) {
-                item = item.accelerator(shortcut);
-            }
-            let item = item
-                .build(app)
-                .map_err(|e| format!("Could not create the menu item: {}", e))?;
-            submenu
-                .append(&item)
-                .map_err(|e| format!("Could not add the menu item: {}", e))?;
+            app.state::<BridgeMenuItems>().add(name, title, shortcut);
+            show_bridge_menu(app)?;
 
             log::info!("Bridge: menu item '{}' registered", title);
-            Ok(serde_json::json!({ "status": "registered", "id": bridge_item_for_menu_event(&id) }))
+            Ok(serde_json::json!({ "status": "registered", "id": name }))
         }
         "unregister" | "disconnect" => {
-            let Some(id) = menu_item_id(&message.data) else {
+            let Some(name) = name else {
                 return Ok(serde_json::json!({ "status": "ignored" }));
             };
-            let submenu = bridge_submenu(app)?;
-            if let Some(existing) = submenu.get(&id) {
-                submenu
-                    .remove(&existing)
-                    .map_err(|e| format!("Could not remove the menu item: {}", e))?;
+
+            if app.state::<BridgeMenuItems>().remove(name) {
+                show_bridge_menu(app)?;
             }
             Ok(serde_json::json!({ "status": "unregistered" }))
         }
         "list" => {
-            let submenu = bridge_submenu(app)?;
-            let items: Vec<serde_json::Value> = submenu
-                .items()
-                .map_err(|e| format!("Could not read the menu: {}", e))?
-                .iter()
-                .filter_map(|kind| kind.as_menuitem())
-                .map(|item| {
-                    serde_json::json!({
-                        "id": bridge_item_for_menu_event(item.id().as_ref()),
-                        "title": item.text().unwrap_or_default(),
-                    })
-                })
+            let items: Vec<serde_json::Value> = app
+                .state::<BridgeMenuItems>()
+                .all()
+                .into_iter()
+                .map(|entry| serde_json::json!({ "id": entry.id, "title": entry.title }))
                 .collect();
             Ok(serde_json::json!({ "status": "ok", "items": items }))
         }
@@ -968,6 +1035,47 @@ mod native_component_tests {
     fn a_question_with_no_words_is_not_asked() {
         assert!(Question::from(&json!({})).message.is_empty());
         assert!(Question::from(&json!({ "message": "   " })).message.is_empty());
+    }
+
+    #[test]
+    fn menu_items_are_kept_in_the_order_they_were_added() {
+        let items = BridgeMenuItems::default();
+
+        items.add("export", "Export PDF", Some("CmdOrCtrl+E"));
+        items.add("print", "Print", None);
+
+        assert_eq!(
+            items.all(),
+            vec![
+                MenuEntry { id: "export".into(), title: "Export PDF".into(), shortcut: Some("CmdOrCtrl+E".into()) },
+                MenuEntry { id: "print".into(), title: "Print".into(), shortcut: None },
+            ]
+        );
+    }
+
+    #[test]
+    fn adding_a_menu_item_again_replaces_it_where_it_was() {
+        let items = BridgeMenuItems::default();
+        items.add("export", "Export PDF", None);
+        items.add("print", "Print", None);
+
+        items.add("export", "Export as PDF", None);
+
+        let titles: Vec<String> = items.all().into_iter().map(|entry| entry.title).collect();
+        assert_eq!(titles, vec!["Export as PDF", "Print"]);
+    }
+
+    // With nothing in it, there is no menu: an empty Actions menu was left
+    // in the menu bar after its last item had gone.
+    #[test]
+    fn the_last_item_gone_leaves_nothing_behind() {
+        let items = BridgeMenuItems::default();
+        items.add("export", "Export PDF", None);
+
+        assert!(items.remove("export"));
+
+        assert!(items.all().is_empty());
+        assert!(!items.remove("export"), "removed what was not there");
     }
 
     #[test]

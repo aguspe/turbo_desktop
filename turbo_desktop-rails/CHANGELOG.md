@@ -6,6 +6,12 @@ Version aligned with the desktop shell's 0.2.4 release. In the gem, the Dev
 Inspector's scripts are served so that an upgrade takes effect at once. What
 changed in the shell:
 
+### Added
+
+- `turbo_desktop_modal?` and `turbo_desktop_presentation`: how the shell will
+  present the page being rendered, from the path configuration, so that a
+  layout can leave the navigation out of a modal.
+
 ### Fixed
 
 - Opening the app starts the Rails server. `tauri dev` used to wait for the
@@ -51,6 +57,12 @@ changed in the shell:
   `confirm()`, so every button that asked first did nothing. Turbo is given a
   dialog of the system's own, and `TurboDesktop.confirm()` and `.alert()` ask
   and tell from JavaScript.
+- A file opened with the app on macOS is opened, once. It arrived as a
+  `file:` URL, was taken for a link, and the app asked the server for the
+  file's path as a page.
+- The Actions menu can be chosen from with the mouse, and goes when its last
+  item does.
+- A modal on its way to another page shows nothing while the shell decides.
 - Two bridge controllers on one page keep their own component names.
 - In development, the error page opens in the app rather than in the browser.
 - The offline banner goes away when the next request succeeds.

@@ -19,7 +19,27 @@ module TurboDesktop
       @path_configuration.to_json
     end
 
+    # How the shell will present a path: "default", "modal", "new_window" and
+    # so on. Read the way the shell reads it: every rule is tried, and the
+    # last one that matches decides.
+    def presentation_for(path)
+      rules = @path_configuration.to_h.with_indifferent_access[:rules]
+
+      Array(rules).reduce("default") do |presentation, rule|
+        next presentation unless Array(rule[:patterns]).any? { |pattern| matches?(pattern, path) }
+
+        rule.dig(:properties, :presentation).presence&.to_s || "default"
+      end
+    end
+
     private
+
+    # A pattern that is not one matches nothing, as in the shell.
+    def matches?(pattern, path)
+      Regexp.new(pattern.to_s).match?(path.to_s)
+    rescue RegexpError
+      false
+    end
 
     def default_path_configuration
       {

@@ -531,11 +531,20 @@
 
     event.preventDefault();
 
+    // A modal on its way somewhere has nothing more to show: what it was for
+    // is done. Blank until the shell has said whether it is staying.
+    const leaving = TurboDesktop.isModal;
+    if (leaving) document.documentElement.style.visibility = "hidden";
+
     TurboDesktop.proposeVisit(url, action).then((response) => {
       // A modal, a new window, a native screen: the shell opens the URL
       // itself, and this window stays where it is.
       const decided = response ? response.action : action;
-      if (decided === "none") return;
+      if (decided === "none") {
+        // The shell opened the page in a window of its own. This one stays.
+        if (leaving) document.documentElement.style.visibility = "";
+        return;
+      }
 
       // A modal heading for a page that is not a modal's: a saved form being
       // sent back to the list. The modal has done its work. It closes, and
