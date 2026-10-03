@@ -17,6 +17,11 @@ jobs:
   release:
     permissions:
       contents: write # needed to create the release + upload assets
+    # A step's `if` cannot read `secrets`, but a job's `env` can, so the presence
+    # checks become flags the signing steps test. Only booleans live here.
+    env:
+      SIGN_MACOS: ${{ secrets.APPLE_CERTIFICATE != '' }}
+      SIGN_UPDATER: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -53,11 +58,11 @@ jobs:
           cache: npm
       - run: npm ci
 
-      # The `secrets` context can be tested in a step-level `if`, not in a step's
-      # `env`, so a gated step hands the values to later steps through GITHUB_ENV.
-      # Heredoc form keeps multi-line values (a wrapped base64 certificate) intact.
+      # A step's `env` cannot include a key conditionally, so a gated step hands
+      # the values to later steps through GITHUB_ENV. Heredoc form keeps multi-line
+      # values (a wrapped base64 certificate) intact.
       - name: Enable signing and notarization when the secrets are set
-        if: matrix.platform == 'macos-latest' && secrets.APPLE_CERTIFICATE != ''
+        if: matrix.platform == 'macos-latest' && env.SIGN_MACOS == 'true'
         shell: bash
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -76,7 +81,7 @@ jobs:
           done
 
       - name: Enable updater signing when the key is set
-        if: secrets.TAURI_SIGNING_PRIVATE_KEY != ''
+        if: env.SIGN_UPDATER == 'true'
         shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
