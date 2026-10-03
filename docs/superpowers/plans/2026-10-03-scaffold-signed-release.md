@@ -1,5 +1,7 @@
 # Scaffolded Release Workflow with Automatic macOS Signing — Implementation Plan
 
+> **Correction after final review (2026-10-03):** a step-level `if` cannot read the `secrets` context. Both workflows gate on job-level `env` booleans `SIGN_MACOS` / `SIGN_UPDATER` instead; the YAML below was patched to match, the test regexes in the committed suite differ from the ones first written here. See the spec's "Why a step" paragraph.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** `turbo-desktop init` writes a GitHub Actions release workflow into the Rails app, and that workflow signs and notarizes macOS builds by itself whenever the six `APPLE_*` repository secrets exist.
@@ -177,7 +179,7 @@ jobs:
       # `env`, so a gated step hands the values to later steps through GITHUB_ENV.
       # Heredoc form keeps multi-line values (a wrapped base64 certificate) intact.
       - name: Enable signing and notarization when the secrets are set
-        if: matrix.platform == 'macos-latest' && secrets.APPLE_CERTIFICATE != ''
+        if: matrix.platform == 'macos-latest' && env.SIGN_MACOS == 'true'
         shell: bash
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -196,7 +198,7 @@ jobs:
           done
 
       - name: Enable updater signing when the key is set
-        if: secrets.TAURI_SIGNING_PRIVATE_KEY != ''
+        if: env.SIGN_UPDATER == 'true'
         shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -448,7 +450,7 @@ jobs:
       # `env`, so a gated step hands the values to later steps through GITHUB_ENV.
       # Heredoc form keeps multi-line values (a wrapped base64 certificate) intact.
       - name: Enable signing and notarization when the secrets are set
-        if: matrix.platform == 'macos-latest' && secrets.APPLE_CERTIFICATE != ''
+        if: matrix.platform == 'macos-latest' && env.SIGN_MACOS == 'true'
         shell: bash
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -467,7 +469,7 @@ jobs:
           done
 
       - name: Enable updater signing when the key is set
-        if: secrets.TAURI_SIGNING_PRIVATE_KEY != ''
+        if: env.SIGN_UPDATER == 'true'
         shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}

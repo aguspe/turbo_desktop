@@ -47,7 +47,7 @@ block:
 
 ```yaml
 - name: Enable signing and notarization when the secrets are set
-  if: matrix.platform == 'macos-latest' && secrets.APPLE_CERTIFICATE != ''
+  if: matrix.platform == 'macos-latest' && env.SIGN_MACOS == 'true'
   env:
     APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
     APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -65,7 +65,7 @@ block:
     done
 
 - name: Enable updater signing when the key is set
-  if: secrets.TAURI_SIGNING_PRIVATE_KEY != ''
+  if: env.SIGN_UPDATER == 'true'
   env:
     TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
     TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -85,11 +85,16 @@ Behaviour:
 The `tauri-action` step's `env` carries only `GITHUB_TOKEN`. There is nothing
 to uncomment.
 
-Why a step and not `env` on the `tauri-action` step: the `secrets` context can
-be tested in a step-level `if`, but not at job level, and a step's `env` cannot
-include a key conditionally. Writing to `$GITHUB_ENV` from a gated step is the
-one place both constraints are satisfied. Values written there are masked in
-logs like any secret.
+Why a step and not `env` on the `tauri-action` step: a step's `env` cannot
+include a key conditionally, and a step's `if` cannot read the `secrets`
+context at all (GitHub rejects the workflow with "Unrecognized named-value:
+'secrets'"). A job-level `env` can read `secrets`, so the job exposes two
+booleans, `SIGN_MACOS: ${{ secrets.APPLE_CERTIFICATE != '' }}` and
+`SIGN_UPDATER: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}`, the gated
+steps test `env.SIGN_MACOS == 'true'`, and write the values to `$GITHUB_ENV`.
+Values written there are masked in logs like any secret. (Corrected after
+review: the first draft gated on `secrets.APPLE_CERTIFICATE != ''` directly,
+which is not a context a step-level `if` may use.)
 
 Template versus the repo's own `.github/workflows/release.yml`, the only
 permitted differences:

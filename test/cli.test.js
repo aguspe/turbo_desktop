@@ -353,8 +353,16 @@ test("signing is never forced on", () => {
 test("signing turns on when the secrets are set", () => {
   for (const file of WORKFLOWS) {
     const yaml = read(...file);
-    assert.match(yaml, /if: .*secrets\.APPLE_CERTIFICATE != ''/, `${file.join("/")}: macOS signing gated on the certificate`);
-    assert.match(yaml, /if: .*secrets\.TAURI_SIGNING_PRIVATE_KEY != ''/, `${file.join("/")}: updater signing gated on the key`);
+    // The `secrets` context is not available in a step's `if` (GitHub rejects the
+    // workflow with "Unrecognized named-value: 'secrets'"), but a job-level `env`
+    // may read it, so the presence check becomes a boolean flag the steps test.
+    assert.match(yaml, /^\s+SIGN_MACOS: \$\{\{ secrets\.APPLE_CERTIFICATE != '' \}\}$/m, `${file.join("/")}: job env flags the certificate`);
+    assert.match(yaml, /^\s+SIGN_UPDATER: \$\{\{ secrets\.TAURI_SIGNING_PRIVATE_KEY != '' \}\}$/m, `${file.join("/")}: job env flags the updater key`);
+    assert.match(yaml, /if: matrix\.platform == 'macos-latest' && env\.SIGN_MACOS == 'true'/, `${file.join("/")}: macOS signing gated on the flag`);
+    assert.match(yaml, /if: env\.SIGN_UPDATER == 'true'/, `${file.join("/")}: updater signing gated on the flag`);
+    for (const line of yaml.split("\n").filter((l) => /^\s+if: /.test(l))) {
+      assert.doesNotMatch(line, /secrets\./, `${file.join("/")}: \`${line.trim()}\` — secrets are not a context a step-level if can read`);
+    }
     for (const name of [
       "APPLE_CERTIFICATE",
       "APPLE_CERTIFICATE_PASSWORD",
@@ -373,7 +381,7 @@ test("signing turns on when the secrets are set", () => {
 test("the gated steps run under bash on every runner", () => {
   for (const file of WORKFLOWS) {
     const yaml = read(...file);
-    const gated = yaml.split(/\n(?=\s+- name:)/).filter((step) => /secrets\.\w+ != ''/.test(step));
+    const gated = yaml.split(/\n(?=\s+- name:)/).filter((step) => /env\.SIGN_\w+ == 'true'/.test(step));
     assert.equal(gated.length, 2, `${file.join("/")}: one step for Apple, one for the updater`);
     for (const step of gated) {
       assert.match(step, /shell: bash/, `${file.join("/")}: windows-latest defaults to PowerShell, where \${!name} is a syntax error`);
@@ -424,15 +432,15 @@ test("the published package carries the release template", () => {
   assert.ok(files.includes("templates"), "turbo-desktop init copies templates/release.yml out of the installed package");
 });
 
-// Extract the `run:` script of the first step whose `if:` mentions the given
-// secret, and run it the way Actions does (bash --noprofile --norc -eo pipefail)
-// with the given environment and a scratch GITHUB_ENV.
-function runGatedStep(secret, env) {
+// Extract the `run:` script of the step gated on the given SIGN_* flag, and run
+// it the way Actions does (bash --noprofile --norc -eo pipefail) with the given
+// environment and a scratch GITHUB_ENV.
+function runGatedStep(flag, env) {
   const yaml = read("templates", "release.yml");
   const step = yaml
     .split(/\n(?=\s+- name:)/)
-    .find((candidate) => candidate.includes(`secrets.${secret} != ''`));
-  assert.ok(step, `a step gated on ${secret}`);
+    .find((candidate) => candidate.includes(`env.${flag} == 'true'`));
+  assert.ok(step, `a step gated on ${flag}`);
   const script = step
     .match(/run: \|\n([\s\S]*?)(?=\n\s+- name:|\n*$)/)[1]
     .split("\n")
@@ -460,7 +468,7 @@ const ALL_APPLE_SECRETS = {
 test("the signing step survives a multi-line secret", () => {
   // Linux `base64` wraps at 76 columns, so a pasted certificate has newlines.
   const wrapped = "MIIK\nAAAA\nBBBB";
-  const { status, githubEnv } = runGatedStep("APPLE_CERTIFICATE", { ...ALL_APPLE_SECRETS, APPLE_CERTIFICATE: wrapped });
+  const { status, githubEnv } = runGatedStep("SIGN_MACOS", { ...ALL_APPLE_SECRETS, APPLE_CERTIFICATE: wrapped });
 
   assert.equal(status, 0);
   assert.ok(
@@ -472,7 +480,7 @@ test("the signing step survives a multi-line secret", () => {
 
 test("the signing step names a missing secret and stops", () => {
   // GitHub hands an unset secret to the step as an empty string, not an unset variable.
-  const { status, stdout, githubEnv } = runGatedStep("APPLE_CERTIFICATE", { ...ALL_APPLE_SECRETS, APPLE_TEAM_ID: "" });
+  const { status, stdout, githubEnv } = runGatedStep("SIGN_MACOS", { ...ALL_APPLE_SECRETS, APPLE_TEAM_ID: "" });
 
   assert.equal(status, 1, "a half-configured signing setup should fail before the Rust build");
   assert.match(stdout, /::error::APPLE_TEAM_ID is not set/);
@@ -480,7 +488,7 @@ test("the signing step names a missing secret and stops", () => {
 });
 
 test("the updater step passes both key secrets through", () => {
-  const { status, githubEnv } = runGatedStep("TAURI_SIGNING_PRIVATE_KEY", {
+  const { status, githubEnv } = runGatedStep("SIGN_UPDATER", {
     TAURI_SIGNING_PRIVATE_KEY: "dW50cnVzdGVkIGNvbW1lbnQ6\nline2",
     TAURI_SIGNING_PRIVATE_KEY_PASSWORD: "",
   });
