@@ -301,6 +301,8 @@ function cmdInit(args) {
     JSON.stringify(appConfig(guessAppName(projectDir)), null, 2)
   );
 
+  writeReleaseWorkflow(projectDir);
+
   console.log(`
 Turbo Desktop initialized successfully!
 
@@ -323,6 +325,12 @@ Next steps:
 
   4. Start the desktop app (it starts the Rails server too):
      cd desktop && turbo-desktop dev
+
+  5. Ship it. .github/workflows/release.yml builds installers for
+     macOS, Windows and Linux when you push a tag:
+       git tag v0.1.0 && git push origin v0.1.0
+     Add the six APPLE_* repository secrets and macOS builds are signed
+     and notarized too. See docs/DISTRIBUTION.md in the turbo-desktop repo.
 `);
 }
 
@@ -615,4 +623,24 @@ export function guessAppName(projectDir) {
   return name
     .replace(/[_-]/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// Copy the release workflow into the Rails app. It goes in the app root, not in
+// desktop/, because GitHub only reads workflows from the repository root. A
+// workflow that is already there is the user's; leave it alone and say so.
+export function writeReleaseWorkflow(projectDir, log = console.log) {
+  const template = join(PACKAGE_ROOT, "templates", "release.yml");
+  const path = join(resolve(projectDir), ".github", "workflows", "release.yml");
+
+  if (existsSync(path)) {
+    log(
+      `\n  .github/workflows/release.yml already exists, left alone.\n` +
+        `  The scaffold's version is at ${template}`
+    );
+    return { path, written: false };
+  }
+
+  mkdirSync(dirname(path), { recursive: true });
+  copyFileSync(template, path);
+  return { path, written: true };
 }
