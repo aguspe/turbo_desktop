@@ -542,6 +542,25 @@ test("init runs the workflow step and tells the user about tags and secrets", ()
   assert.match(init, /DISTRIBUTION\.md/, "and point at the guide");
 });
 
+test("the distribution guide explains every signing secret and no longer says to uncomment", () => {
+  const guide = read("docs", "DISTRIBUTION.md");
+
+  for (const secret of [
+    "APPLE_CERTIFICATE",
+    "APPLE_CERTIFICATE_PASSWORD",
+    "APPLE_SIGNING_IDENTITY",
+    "APPLE_ID",
+    "APPLE_PASSWORD",
+    "APPLE_TEAM_ID",
+  ]) {
+    assert.match(guide, new RegExp(`gh secret set ${secret}`), `the guide should show how to set ${secret}`);
+    assert.match(guide, new RegExp(`\\| \`${secret}\` \\|`), `the guide should say where ${secret} comes from`);
+  }
+  assert.doesNotMatch(guide, /uncomment/i, "signing is automatic now; telling readers to uncomment sends them hunting");
+  assert.match(guide, /spctl -a -vv/, "readers need a way to confirm the notarization took");
+  assert.match(guide, /templates\/release\.yml/, "existing projects need the template's location");
+});
+
 // ─── What the documentation and the types promise ────────────────────────────
 
 test("the README mounts the engine rather than routing to a controller that does not exist", () => {
