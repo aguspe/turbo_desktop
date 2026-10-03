@@ -4,6 +4,10 @@ name: Release
 # This builds installers for macOS (universal), Windows, and Linux, and attaches
 # them to a draft GitHub Release. Tauri can't cross-compile, so each OS builds on
 # its own runner.
+#
+# Builds are unsigned until you add repository secrets; see docs/DISTRIBUTION.md.
+# With the six APPLE_* secrets set, macOS builds are signed and notarized. With
+# TAURI_SIGNING_PRIVATE_KEY set, updater artifacts are signed. Nothing to edit.
 on:
   push:
     tags: ["v*"]
@@ -49,27 +53,43 @@ jobs:
           cache: npm
       - run: npm ci
 
+      # The `secrets` context can be tested in a step-level `if`, not in a step's
+      # `env`, so a gated step hands the values to later steps through GITHUB_ENV.
+      # Heredoc form keeps multi-line values (a wrapped base64 certificate) intact.
+      - name: Enable signing and notarization when the secrets are set
+        if: matrix.platform == 'macos-latest' && secrets.APPLE_CERTIFICATE != ''
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!name}" ]; then
+              echo "::error::$name is not set. Signing needs all six APPLE_* secrets; see docs/DISTRIBUTION.md"
+              exit 1
+            fi
+            { echo "$name<<__TURBO_DESKTOP__"; echo "${!name}"; echo "__TURBO_DESKTOP__"; } >> "$GITHUB_ENV"
+          done
+
+      - name: Enable updater signing when the key is set
+        if: secrets.TAURI_SIGNING_PRIVATE_KEY != ''
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          for name in TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD; do
+            { echo "$name<<__TURBO_DESKTOP__"; echo "${!name}"; echo "__TURBO_DESKTOP__"; } >> "$GITHUB_ENV"
+          done
+
       - name: Build and release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # --- Code signing (opt-in) ---------------------------------------------
-          # Builds are UNSIGNED by default (they work, but trigger Gatekeeper /
-          # SmartScreen warnings). To ship SIGNED macOS builds, UNCOMMENT the block
-          # below and set the matching repo secrets. Do NOT leave these set to empty
-          # secrets — an empty APPLE_CERTIFICATE makes Tauri try (and fail) to import
-          # an empty keychain certificate.
-          #
-          # APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          # APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          # APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          # APPLE_ID: ${{ secrets.APPLE_ID }}
-          # APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          #
-          # Auto-updater signing (only if you use the updater plugin):
-          # TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          # TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Turbo Desktop ${{ github.ref_name }}"
