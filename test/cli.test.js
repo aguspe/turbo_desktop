@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, mkdtempSync } from "node:fs";
+import { readFileSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
@@ -332,7 +332,10 @@ function tauriActionEnvKeys(yaml) {
     .map((line) => line.trim().split(":")[0]);
 }
 
-const WORKFLOWS = [[".github", "workflows", "release.yml"]];
+const WORKFLOWS = [
+  [".github", "workflows", "release.yml"],
+  ["templates", "release.yml"],
+];
 
 test("signing is never forced on", () => {
   for (const file of WORKFLOWS) {
@@ -375,6 +378,115 @@ test("the gated steps run under bash on every runner", () => {
       assert.match(step, /shell: bash/, `${file.join("/")}: windows-latest defaults to PowerShell, where \${!name} is a syntax error`);
     }
   }
+});
+
+// The scaffold copies the template; the repo releases itself with the real
+// workflow. They must be the same workflow apart from where the project lives.
+const TEMPLATE_ONLY_DIFFERENCES = [
+  /^\s*#/, // comments explain each file's own audience
+  /^\s*$/,
+  /projectPath: desktop/,
+  /working-directory: desktop/,
+  /run: npm (ci|install)/,
+  /cache: npm/, // the scaffold commits no lockfile for setup-node to key on
+  /releaseName:/,
+];
+
+test("the template tracks the repo's release workflow", () => {
+  const repo = read(".github", "workflows", "release.yml").split("\n");
+  const template = read("templates", "release.yml").split("\n");
+  const differing = [
+    ...repo.filter((line) => !template.includes(line)),
+    ...template.filter((line) => !repo.includes(line)),
+  ];
+
+  assert.ok(differing.length > 0, "the template should at least point at desktop/");
+  for (const line of differing) {
+    assert.ok(
+      TEMPLATE_ONLY_DIFFERENCES.some((allowed) => allowed.test(line)),
+      `templates/release.yml and .github/workflows/release.yml disagree on \`${line.trim()}\`; fix both or allow the difference`
+    );
+  }
+});
+
+test("the template builds the desktop/ project the scaffold creates", () => {
+  const template = read("templates", "release.yml");
+  assert.match(template, /projectPath: desktop/, "tauri-action must look in desktop/");
+  assert.match(template, /working-directory: desktop/, "npm install must run in desktop/");
+  assert.doesNotMatch(template, /npm ci/, "the scaffold writes no lockfile, so npm ci would fail");
+  assert.doesNotMatch(template, /cache: npm/, "setup-node's cache needs a lockfile to key on");
+  assert.doesNotMatch(template, /Turbo Desktop \$\{\{/, "the release should carry the app's name, not the shell's");
+});
+
+test("the published package carries the release template", () => {
+  const { files } = JSON.parse(read("package.json"));
+  assert.ok(files.includes("templates"), "turbo-desktop init copies templates/release.yml out of the installed package");
+});
+
+// Extract the `run:` script of the first step whose `if:` mentions the given
+// secret, and run it the way Actions does (bash --noprofile --norc -eo pipefail)
+// with the given environment and a scratch GITHUB_ENV.
+function runGatedStep(secret, env) {
+  const yaml = read("templates", "release.yml");
+  const step = yaml
+    .split(/\n(?=\s+- name:)/)
+    .find((candidate) => candidate.includes(`secrets.${secret} != ''`));
+  assert.ok(step, `a step gated on ${secret}`);
+  const script = step
+    .match(/run: \|\n([\s\S]*?)(?=\n\s+- name:|\n*$)/)[1]
+    .split("\n")
+    .map((line) => line.replace(/^ {10}/, ""))
+    .join("\n");
+
+  const githubEnvPath = join(mkdtempSync(join(tmpdir(), "turbo-desktop-gh-env-")), "env");
+  writeFileSync(githubEnvPath, "");
+  const result = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", script], {
+    env: { PATH: process.env.PATH, GITHUB_ENV: githubEnvPath, ...env },
+    encoding: "utf-8",
+  });
+  return { status: result.status, stderr: result.stderr, stdout: result.stdout, githubEnv: readFileSync(githubEnvPath, "utf-8") };
+}
+
+const ALL_APPLE_SECRETS = {
+  APPLE_CERTIFICATE: "MIIK",
+  APPLE_CERTIFICATE_PASSWORD: "pw",
+  APPLE_SIGNING_IDENTITY: "Developer ID Application: Example (TEAMID1234)",
+  APPLE_ID: "dev@example.com",
+  APPLE_PASSWORD: "abcd-efgh-ijkl-mnop",
+  APPLE_TEAM_ID: "TEAMID1234",
+};
+
+test("the signing step survives a multi-line secret", () => {
+  // Linux `base64` wraps at 76 columns, so a pasted certificate has newlines.
+  const wrapped = "MIIK\nAAAA\nBBBB";
+  const { status, githubEnv } = runGatedStep("APPLE_CERTIFICATE", { ...ALL_APPLE_SECRETS, APPLE_CERTIFICATE: wrapped });
+
+  assert.equal(status, 0);
+  assert.ok(
+    githubEnv.includes(`APPLE_CERTIFICATE<<__TURBO_DESKTOP__\n${wrapped}\n__TURBO_DESKTOP__\n`),
+    "a KEY=value line would truncate the certificate at the first newline"
+  );
+  assert.ok(githubEnv.includes("APPLE_TEAM_ID<<__TURBO_DESKTOP__\nTEAMID1234\n__TURBO_DESKTOP__"));
+});
+
+test("the signing step names a missing secret and stops", () => {
+  // GitHub hands an unset secret to the step as an empty string, not an unset variable.
+  const { status, stdout, githubEnv } = runGatedStep("APPLE_CERTIFICATE", { ...ALL_APPLE_SECRETS, APPLE_TEAM_ID: "" });
+
+  assert.equal(status, 1, "a half-configured signing setup should fail before the Rust build");
+  assert.match(stdout, /::error::APPLE_TEAM_ID is not set/);
+  assert.doesNotMatch(githubEnv, /APPLE_TEAM_ID/, "nothing partial should reach later steps");
+});
+
+test("the updater step passes both key secrets through", () => {
+  const { status, githubEnv } = runGatedStep("TAURI_SIGNING_PRIVATE_KEY", {
+    TAURI_SIGNING_PRIVATE_KEY: "dW50cnVzdGVkIGNvbW1lbnQ6\nline2",
+    TAURI_SIGNING_PRIVATE_KEY_PASSWORD: "",
+  });
+
+  assert.equal(status, 0, "an empty password is valid for an unencrypted key");
+  assert.ok(githubEnv.includes("TAURI_SIGNING_PRIVATE_KEY<<__TURBO_DESKTOP__\ndW50cnVzdGVkIGNvbW1lbnQ6\nline2\n__TURBO_DESKTOP__"));
+  assert.ok(githubEnv.includes("TAURI_SIGNING_PRIVATE_KEY_PASSWORD<<__TURBO_DESKTOP__\n\n__TURBO_DESKTOP__"));
 });
 
 // ─── What the documentation and the types promise ────────────────────────────
