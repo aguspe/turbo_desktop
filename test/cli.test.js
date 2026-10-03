@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, mkdtempSync } from "node:fs";
+import { readFileSync, mkdtempSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
@@ -17,6 +17,7 @@ import {
   guessAppName,
   packageVersion,
   run,
+  writeReleaseWorkflow,
 } from "../cli/turbo-desktop.js";
 
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -315,6 +316,257 @@ test("the release guide covers every place a release has to reach", () => {
   for (const step of ["gem push", "npm publish", "git tag", "turbo_desktop_site"]) {
     assert.ok(guide.includes(step), `docs/RELEASING.md should cover \`${step}\``);
   }
+});
+
+// ─── Release workflow ────────────────────────────────────────────────────────
+
+// Keys under `env:` of the tauri-action step. No YAML parser: the step is the
+// only `uses: tauri-apps/tauri-action` in the file and `with:` always follows.
+function tauriActionEnvKeys(yaml) {
+  const step = yaml.match(/uses: tauri-apps\/tauri-action[\s\S]*?\n\s+with:/);
+  assert.ok(step, "the workflow should run tauri-action with a `with:` block");
+  const env = step[0].match(/\n\s+env:\n([\s\S]*?)\n\s+with:/);
+  if (!env) return [];
+  return env[1]
+    .split("\n")
+    .filter((line) => /^\s+[A-Z_]+:/.test(line))
+    .map((line) => line.trim().split(":")[0]);
+}
+
+const WORKFLOWS = [
+  [".github", "workflows", "release.yml"],
+  ["templates", "release.yml"],
+];
+
+test("signing is never forced on", () => {
+  for (const file of WORKFLOWS) {
+    const yaml = read(...file);
+    assert.deepEqual(
+      tauriActionEnvKeys(yaml),
+      ["GITHUB_TOKEN"],
+      `${file.join("/")}: an APPLE_* secret passed while unset makes Tauri import an empty certificate`
+    );
+    assert.doesNotMatch(yaml, /^\s*#\s*APPLE_/m, `${file.join("/")}: no commented-out signing block to uncomment`);
+  }
+});
+
+test("signing turns on when the secrets are set", () => {
+  for (const file of WORKFLOWS) {
+    const yaml = read(...file);
+    // The `secrets` context is not available in a step's `if` (GitHub rejects the
+    // workflow with "Unrecognized named-value: 'secrets'"), but a job-level `env`
+    // may read it, so the presence check becomes a boolean flag the steps test.
+    assert.match(yaml, /^\s+SIGN_MACOS: \$\{\{ secrets\.APPLE_CERTIFICATE != '' \}\}$/m, `${file.join("/")}: job env flags the certificate`);
+    assert.match(yaml, /^\s+SIGN_UPDATER: \$\{\{ secrets\.TAURI_SIGNING_PRIVATE_KEY != '' \}\}$/m, `${file.join("/")}: job env flags the updater key`);
+    assert.match(yaml, /if: matrix\.platform == 'macos-latest' && env\.SIGN_MACOS == 'true'/, `${file.join("/")}: macOS signing gated on the flag`);
+    assert.match(yaml, /if: env\.SIGN_UPDATER == 'true'/, `${file.join("/")}: updater signing gated on the flag`);
+    for (const line of yaml.split("\n").filter((l) => /^\s+if: /.test(l))) {
+      assert.doesNotMatch(line, /secrets\./, `${file.join("/")}: \`${line.trim()}\` — secrets are not a context a step-level if can read`);
+    }
+    for (const name of [
+      "APPLE_CERTIFICATE",
+      "APPLE_CERTIFICATE_PASSWORD",
+      "APPLE_SIGNING_IDENTITY",
+      "APPLE_ID",
+      "APPLE_PASSWORD",
+      "APPLE_TEAM_ID",
+      "TAURI_SIGNING_PRIVATE_KEY",
+      "TAURI_SIGNING_PRIVATE_KEY_PASSWORD",
+    ]) {
+      assert.match(yaml, new RegExp(`${name}: \\$\\{\\{ secrets\\.${name} \\}\\}`), `${file.join("/")}: passes ${name}`);
+    }
+  }
+});
+
+test("the gated steps run under bash on every runner", () => {
+  for (const file of WORKFLOWS) {
+    const yaml = read(...file);
+    const gated = yaml.split(/\n(?=\s+- name:)/).filter((step) => /env\.SIGN_\w+ == 'true'/.test(step));
+    assert.equal(gated.length, 2, `${file.join("/")}: one step for Apple, one for the updater`);
+    for (const step of gated) {
+      assert.match(step, /shell: bash/, `${file.join("/")}: windows-latest defaults to PowerShell, where \${!name} is a syntax error`);
+    }
+  }
+});
+
+// The scaffold copies the template; the repo releases itself with the real
+// workflow. They must be the same workflow apart from where the project lives.
+const TEMPLATE_ONLY_DIFFERENCES = [
+  /^\s*#/, // comments explain each file's own audience
+  /^\s*$/,
+  /projectPath: desktop/,
+  /working-directory: desktop/,
+  /run: npm (ci|install)/,
+  /cache: npm/, // the scaffold commits no lockfile for setup-node to key on
+  /releaseName:/,
+];
+
+test("the template tracks the repo's release workflow", () => {
+  const repo = read(".github", "workflows", "release.yml").split("\n");
+  const template = read("templates", "release.yml").split("\n");
+  const differing = [
+    ...repo.filter((line) => !template.includes(line)),
+    ...template.filter((line) => !repo.includes(line)),
+  ];
+
+  assert.ok(differing.length > 0, "the template should at least point at desktop/");
+  for (const line of differing) {
+    assert.ok(
+      TEMPLATE_ONLY_DIFFERENCES.some((allowed) => allowed.test(line)),
+      `templates/release.yml and .github/workflows/release.yml disagree on \`${line.trim()}\`; fix both or allow the difference`
+    );
+  }
+});
+
+test("the template builds the desktop/ project the scaffold creates", () => {
+  const template = read("templates", "release.yml");
+  assert.match(template, /projectPath: desktop/, "tauri-action must look in desktop/");
+  assert.match(template, /working-directory: desktop/, "npm install must run in desktop/");
+  assert.doesNotMatch(template, /npm ci/, "the scaffold writes no lockfile, so npm ci would fail");
+  assert.doesNotMatch(template, /cache: npm/, "setup-node's cache needs a lockfile to key on");
+  assert.doesNotMatch(template, /Turbo Desktop \$\{\{/, "the release should carry the app's name, not the shell's");
+});
+
+test("the published package carries the release template", () => {
+  const { files } = JSON.parse(read("package.json"));
+  assert.ok(files.includes("templates"), "turbo-desktop init copies templates/release.yml out of the installed package");
+});
+
+// Extract the `run:` script of the step gated on the given SIGN_* flag, and run
+// it the way Actions does (bash --noprofile --norc -eo pipefail) with the given
+// environment and a scratch GITHUB_ENV.
+function runGatedStep(flag, env) {
+  const yaml = read("templates", "release.yml");
+  const step = yaml
+    .split(/\n(?=\s+- name:)/)
+    .find((candidate) => candidate.includes(`env.${flag} == 'true'`));
+  assert.ok(step, `a step gated on ${flag}`);
+  const script = step
+    .match(/run: \|\n([\s\S]*?)(?=\n\s+- name:|\n*$)/)[1]
+    .split("\n")
+    .map((line) => line.replace(/^ {10}/, ""))
+    .join("\n");
+
+  const githubEnvPath = join(mkdtempSync(join(tmpdir(), "turbo-desktop-gh-env-")), "env");
+  writeFileSync(githubEnvPath, "");
+  const result = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", script], {
+    env: { PATH: process.env.PATH, GITHUB_ENV: githubEnvPath, ...env },
+    encoding: "utf-8",
+  });
+  return { status: result.status, stderr: result.stderr, stdout: result.stdout, githubEnv: readFileSync(githubEnvPath, "utf-8") };
+}
+
+const ALL_APPLE_SECRETS = {
+  APPLE_CERTIFICATE: "MIIK",
+  APPLE_CERTIFICATE_PASSWORD: "pw",
+  APPLE_SIGNING_IDENTITY: "Developer ID Application: Example (TEAMID1234)",
+  APPLE_ID: "dev@example.com",
+  APPLE_PASSWORD: "abcd-efgh-ijkl-mnop",
+  APPLE_TEAM_ID: "TEAMID1234",
+};
+
+test("the signing step survives a multi-line secret", () => {
+  // Linux `base64` wraps at 76 columns, so a pasted certificate has newlines.
+  const wrapped = "MIIK\nAAAA\nBBBB";
+  const { status, githubEnv } = runGatedStep("SIGN_MACOS", { ...ALL_APPLE_SECRETS, APPLE_CERTIFICATE: wrapped });
+
+  assert.equal(status, 0);
+  assert.ok(
+    githubEnv.includes(`APPLE_CERTIFICATE<<__TURBO_DESKTOP__\n${wrapped}\n__TURBO_DESKTOP__\n`),
+    "a KEY=value line would truncate the certificate at the first newline"
+  );
+  assert.ok(githubEnv.includes("APPLE_TEAM_ID<<__TURBO_DESKTOP__\nTEAMID1234\n__TURBO_DESKTOP__"));
+});
+
+test("the signing step names a missing secret and stops", () => {
+  // GitHub hands an unset secret to the step as an empty string, not an unset variable.
+  const { status, stdout, githubEnv } = runGatedStep("SIGN_MACOS", { ...ALL_APPLE_SECRETS, APPLE_TEAM_ID: "" });
+
+  assert.equal(status, 1, "a half-configured signing setup should fail before the Rust build");
+  assert.match(stdout, /::error::APPLE_TEAM_ID is not set/);
+  assert.doesNotMatch(githubEnv, /APPLE_TEAM_ID/, "nothing partial should reach later steps");
+});
+
+test("the updater step passes both key secrets through", () => {
+  const { status, githubEnv } = runGatedStep("SIGN_UPDATER", {
+    TAURI_SIGNING_PRIVATE_KEY: "dW50cnVzdGVkIGNvbW1lbnQ6\nline2",
+    TAURI_SIGNING_PRIVATE_KEY_PASSWORD: "",
+  });
+
+  assert.equal(status, 0, "an empty password is valid for an unencrypted key");
+  assert.ok(githubEnv.includes("TAURI_SIGNING_PRIVATE_KEY<<__TURBO_DESKTOP__\ndW50cnVzdGVkIGNvbW1lbnQ6\nline2\n__TURBO_DESKTOP__"));
+  assert.ok(githubEnv.includes("TAURI_SIGNING_PRIVATE_KEY_PASSWORD<<__TURBO_DESKTOP__\n\n__TURBO_DESKTOP__"));
+});
+
+// ─── Scaffolding the release workflow ────────────────────────────────────────
+
+const scratchProject = () => mkdtempSync(join(tmpdir(), "turbo-desktop-scaffold-"));
+
+test("a scaffolded project gets a release workflow", () => {
+  const project = scratchProject();
+  const quiet = [];
+  const { path, written } = writeReleaseWorkflow(project, (line) => quiet.push(line));
+
+  assert.equal(written, true);
+  assert.equal(path, join(project, ".github", "workflows", "release.yml"));
+  assert.equal(readFileSync(path, "utf-8"), read("templates", "release.yml"), "the scaffold copies the template verbatim");
+});
+
+test("the scaffold creates .github/workflows when only .github exists", () => {
+  // An app older than Rails 7.2 may have .github/dependabot.yml and no workflows/.
+  const project = scratchProject();
+  mkdirSync(join(project, ".github"));
+  writeFileSync(join(project, ".github", "dependabot.yml"), "version: 2\n");
+
+  const { written } = writeReleaseWorkflow(project, () => {});
+
+  assert.equal(written, true);
+  assert.ok(existsSync(join(project, ".github", "workflows", "release.yml")));
+  assert.equal(readFileSync(join(project, ".github", "dependabot.yml"), "utf-8"), "version: 2\n", "neighbours untouched");
+});
+
+test("the scaffold never overwrites a release workflow", () => {
+  const project = scratchProject();
+  const target = join(project, ".github", "workflows", "release.yml");
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, "# mine\n");
+  const said = [];
+
+  const { written } = writeReleaseWorkflow(project, (line) => said.push(line));
+
+  assert.equal(written, false);
+  assert.equal(readFileSync(target, "utf-8"), "# mine\n", "a hand-written workflow must survive a re-run of init");
+  assert.match(said.join("\n"), /release\.yml already exists/, "the user should hear that their file was kept");
+  assert.match(said.join("\n"), /templates\/release\.yml/, "and where to find the template if they want it");
+});
+
+test("init runs the workflow step and tells the user about tags and secrets", () => {
+  const cli = read("cli", "turbo-desktop.js");
+  const init = cli.slice(cli.indexOf("function cmdInit("), cli.indexOf("function cmdDev("));
+
+  assert.match(init, /writeReleaseWorkflow\(projectDir\)/, "cmdInit should write the workflow");
+  assert.match(init, /git tag v/, "next steps should show how a release starts");
+  assert.match(init, /APPLE_\*/, "next steps should mention the signing secrets");
+  assert.match(init, /DISTRIBUTION\.md/, "and point at the guide");
+});
+
+test("the distribution guide explains every signing secret and no longer says to uncomment", () => {
+  const guide = read("docs", "DISTRIBUTION.md");
+
+  for (const secret of [
+    "APPLE_CERTIFICATE",
+    "APPLE_CERTIFICATE_PASSWORD",
+    "APPLE_SIGNING_IDENTITY",
+    "APPLE_ID",
+    "APPLE_PASSWORD",
+    "APPLE_TEAM_ID",
+  ]) {
+    assert.match(guide, new RegExp(`gh secret set ${secret}`), `the guide should show how to set ${secret}`);
+    assert.match(guide, new RegExp(`\\| \`${secret}\` \\|`), `the guide should say where ${secret} comes from`);
+  }
+  assert.doesNotMatch(guide, /uncomment/i, "signing is automatic now; telling readers to uncomment sends them hunting");
+  assert.match(guide, /spctl -a -vv/, "readers need a way to confirm the notarization took");
+  assert.match(guide, /templates\/release\.yml/, "existing projects need the template's location");
 });
 
 // ─── What the documentation and the types promise ────────────────────────────

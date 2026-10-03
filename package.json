@@ -39,6 +39,7 @@
     "src-tauri/Cargo.toml",
     "src-tauri/build.rs",
     "src-tauri/tauri.conf.json",
+    "templates",
     "README.md",
     "LICENSE"
   ],

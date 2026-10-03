@@ -893,8 +893,9 @@ draft GitHub Release:
 git tag v0.2.4 && git push origin v0.2.4
 ```
 
-See **[docs/DISTRIBUTION.md](docs/DISTRIBUTION.md)** for local builds, using it in your own app,
-and the optional signing / auto-update setup.
+`turbo-desktop new` writes the same workflow into your app. Add six `APPLE_*` repository secrets
+and macOS builds come out signed and notarized; nothing in the workflow needs editing. See
+**[docs/DISTRIBUTION.md](docs/DISTRIBUTION.md)** for the secrets, local builds and auto-update.
 
 ## Project Structure
 

@@ -5,7 +5,8 @@ name: Release
 # them to a draft GitHub Release. Tauri can't cross-compile, so each OS builds on
 # its own runner.
 #
-# Builds are unsigned until you add repository secrets; see docs/DISTRIBUTION.md.
+# Written by `turbo-desktop init`. Builds are unsigned until you add repository
+# secrets: https://github.com/aguspe/turbo_desktop/blob/main/docs/DISTRIBUTION.md
 # With the six APPLE_* secrets set, macOS builds are signed and notarized. With
 # TAURI_SIGNING_PRIVATE_KEY set, updater artifacts are signed. Nothing to edit.
 on:
@@ -55,8 +56,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-      - run: npm ci
+      - run: npm install
+        working-directory: desktop
 
       # A step's `env` cannot include a key conditionally, so a gated step hands
       # the values to later steps through GITHUB_ENV. Heredoc form keeps multi-line
@@ -96,8 +97,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          projectPath: desktop
           tagName: ${{ github.ref_name }}
-          releaseName: "Turbo Desktop ${{ github.ref_name }}"
+          releaseName: "${{ github.event.repository.name }} ${{ github.ref_name }}"
           releaseBody: "Download the installer for your platform below."
           releaseDraft: true # review before publishing
           prerelease: false
