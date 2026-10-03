@@ -317,6 +317,66 @@ test("the release guide covers every place a release has to reach", () => {
   }
 });
 
+// ─── Release workflow ────────────────────────────────────────────────────────
+
+// Keys under `env:` of the tauri-action step. No YAML parser: the step is the
+// only `uses: tauri-apps/tauri-action` in the file and `with:` always follows.
+function tauriActionEnvKeys(yaml) {
+  const step = yaml.match(/uses: tauri-apps\/tauri-action[\s\S]*?\n\s+with:/);
+  assert.ok(step, "the workflow should run tauri-action with a `with:` block");
+  const env = step[0].match(/\n\s+env:\n([\s\S]*?)\n\s+with:/);
+  if (!env) return [];
+  return env[1]
+    .split("\n")
+    .filter((line) => /^\s+[A-Z_]+:/.test(line))
+    .map((line) => line.trim().split(":")[0]);
+}
+
+const WORKFLOWS = [[".github", "workflows", "release.yml"]];
+
+test("signing is never forced on", () => {
+  for (const file of WORKFLOWS) {
+    const yaml = read(...file);
+    assert.deepEqual(
+      tauriActionEnvKeys(yaml),
+      ["GITHUB_TOKEN"],
+      `${file.join("/")}: an APPLE_* secret passed while unset makes Tauri import an empty certificate`
+    );
+    assert.doesNotMatch(yaml, /^\s*#\s*APPLE_/m, `${file.join("/")}: no commented-out signing block to uncomment`);
+  }
+});
+
+test("signing turns on when the secrets are set", () => {
+  for (const file of WORKFLOWS) {
+    const yaml = read(...file);
+    assert.match(yaml, /if: .*secrets\.APPLE_CERTIFICATE != ''/, `${file.join("/")}: macOS signing gated on the certificate`);
+    assert.match(yaml, /if: .*secrets\.TAURI_SIGNING_PRIVATE_KEY != ''/, `${file.join("/")}: updater signing gated on the key`);
+    for (const name of [
+      "APPLE_CERTIFICATE",
+      "APPLE_CERTIFICATE_PASSWORD",
+      "APPLE_SIGNING_IDENTITY",
+      "APPLE_ID",
+      "APPLE_PASSWORD",
+      "APPLE_TEAM_ID",
+      "TAURI_SIGNING_PRIVATE_KEY",
+      "TAURI_SIGNING_PRIVATE_KEY_PASSWORD",
+    ]) {
+      assert.match(yaml, new RegExp(`${name}: \\$\\{\\{ secrets\\.${name} \\}\\}`), `${file.join("/")}: passes ${name}`);
+    }
+  }
+});
+
+test("the gated steps run under bash on every runner", () => {
+  for (const file of WORKFLOWS) {
+    const yaml = read(...file);
+    const gated = yaml.split(/\n(?=\s+- name:)/).filter((step) => /secrets\.\w+ != ''/.test(step));
+    assert.equal(gated.length, 2, `${file.join("/")}: one step for Apple, one for the updater`);
+    for (const step of gated) {
+      assert.match(step, /shell: bash/, `${file.join("/")}: windows-latest defaults to PowerShell, where \${!name} is a syntax error`);
+    }
+  }
+});
+
 // ─── What the documentation and the types promise ────────────────────────────
 
 test("the README mounts the engine rather than routing to a controller that does not exist", () => {
