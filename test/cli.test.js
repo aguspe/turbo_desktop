@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, mkdtempSync, writeFileSync } from "node:fs";
+import { readFileSync, mkdtempSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
@@ -17,6 +17,7 @@ import {
   guessAppName,
   packageVersion,
   run,
+  writeReleaseWorkflow,
 } from "../cli/turbo-desktop.js";
 
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -487,6 +488,58 @@ test("the updater step passes both key secrets through", () => {
   assert.equal(status, 0, "an empty password is valid for an unencrypted key");
   assert.ok(githubEnv.includes("TAURI_SIGNING_PRIVATE_KEY<<__TURBO_DESKTOP__\ndW50cnVzdGVkIGNvbW1lbnQ6\nline2\n__TURBO_DESKTOP__"));
   assert.ok(githubEnv.includes("TAURI_SIGNING_PRIVATE_KEY_PASSWORD<<__TURBO_DESKTOP__\n\n__TURBO_DESKTOP__"));
+});
+
+// ─── Scaffolding the release workflow ────────────────────────────────────────
+
+const scratchProject = () => mkdtempSync(join(tmpdir(), "turbo-desktop-scaffold-"));
+
+test("a scaffolded project gets a release workflow", () => {
+  const project = scratchProject();
+  const quiet = [];
+  const { path, written } = writeReleaseWorkflow(project, (line) => quiet.push(line));
+
+  assert.equal(written, true);
+  assert.equal(path, join(project, ".github", "workflows", "release.yml"));
+  assert.equal(readFileSync(path, "utf-8"), read("templates", "release.yml"), "the scaffold copies the template verbatim");
+});
+
+test("the scaffold creates .github/workflows when only .github exists", () => {
+  // An app older than Rails 7.2 may have .github/dependabot.yml and no workflows/.
+  const project = scratchProject();
+  mkdirSync(join(project, ".github"));
+  writeFileSync(join(project, ".github", "dependabot.yml"), "version: 2\n");
+
+  const { written } = writeReleaseWorkflow(project, () => {});
+
+  assert.equal(written, true);
+  assert.ok(existsSync(join(project, ".github", "workflows", "release.yml")));
+  assert.equal(readFileSync(join(project, ".github", "dependabot.yml"), "utf-8"), "version: 2\n", "neighbours untouched");
+});
+
+test("the scaffold never overwrites a release workflow", () => {
+  const project = scratchProject();
+  const target = join(project, ".github", "workflows", "release.yml");
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, "# mine\n");
+  const said = [];
+
+  const { written } = writeReleaseWorkflow(project, (line) => said.push(line));
+
+  assert.equal(written, false);
+  assert.equal(readFileSync(target, "utf-8"), "# mine\n", "a hand-written workflow must survive a re-run of init");
+  assert.match(said.join("\n"), /release\.yml already exists/, "the user should hear that their file was kept");
+  assert.match(said.join("\n"), /templates\/release\.yml/, "and where to find the template if they want it");
+});
+
+test("init runs the workflow step and tells the user about tags and secrets", () => {
+  const cli = read("cli", "turbo-desktop.js");
+  const init = cli.slice(cli.indexOf("function cmdInit("), cli.indexOf("function cmdDev("));
+
+  assert.match(init, /writeReleaseWorkflow\(projectDir\)/, "cmdInit should write the workflow");
+  assert.match(init, /git tag v/, "next steps should show how a release starts");
+  assert.match(init, /APPLE_\*/, "next steps should mention the signing secrets");
+  assert.match(init, /DISTRIBUTION\.md/, "and point at the guide");
 });
 
 // ─── What the documentation and the types promise ────────────────────────────
