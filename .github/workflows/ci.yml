@@ -55,7 +55,9 @@ jobs:
 
   e2e:
     name: E2E (tauri-driver)
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest became 26.04 in October 2026, which has no
+    # webkit2gtk-driver package, so tauri-driver cannot run there yet.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
