@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, mkdtempSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, mkdtempSync, writeFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
@@ -18,6 +18,7 @@ import {
   packageVersion,
   run,
   writeReleaseWorkflow,
+  releaseNextStep,
 } from "../cli/turbo-desktop.js";
 
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -402,20 +403,20 @@ const TEMPLATE_ONLY_DIFFERENCES = [
 ];
 
 test("the template tracks the repo's release workflow", () => {
-  const repo = read(".github", "workflows", "release.yml").split("\n");
-  const template = read("templates", "release.yml").split("\n");
-  const differing = [
-    ...repo.filter((line) => !template.includes(line)),
-    ...template.filter((line) => !repo.includes(line)),
-  ];
+  // Compared in order, not as sets: a step moved below tauri-action, or a line
+  // duplicated in one file, must not pass as "in sync".
+  const meaningful = (file) =>
+    read(...file)
+      .split("\n")
+      .filter((line) => !TEMPLATE_ONLY_DIFFERENCES.some((allowed) => allowed.test(line)));
+  const repo = meaningful([".github", "workflows", "release.yml"]);
+  const template = meaningful(["templates", "release.yml"]);
 
-  assert.ok(differing.length > 0, "the template should at least point at desktop/");
-  for (const line of differing) {
-    assert.ok(
-      TEMPLATE_ONLY_DIFFERENCES.some((allowed) => allowed.test(line)),
-      `templates/release.yml and .github/workflows/release.yml disagree on \`${line.trim()}\`; fix both or allow the difference`
-    );
-  }
+  assert.deepEqual(
+    template,
+    repo,
+    "templates/release.yml and .github/workflows/release.yml disagree once their audience-specific lines are removed; fix both or allow the difference"
+  );
 });
 
 test("the template builds the desktop/ project the scaffold creates", () => {
@@ -430,6 +431,27 @@ test("the template builds the desktop/ project the scaffold creates", () => {
 test("the published package carries the release template", () => {
   const { files } = JSON.parse(read("package.json"));
   assert.ok(files.includes("templates"), "turbo-desktop init copies templates/release.yml out of the installed package");
+});
+
+test("the templates directory holds only what the CLI copies", () => {
+  assert.deepEqual(readdirSync(join(PACKAGE_ROOT, "templates")), ["release.yml"]);
+});
+
+test("secrets reach GITHUB_ENV through printf, so a value starting with -n or -e survives", () => {
+  for (const file of [[".github", "workflows", "release.yml"], ["templates", "release.yml"]]) {
+    const workflow = read(...file);
+    assert.doesNotMatch(workflow, /echo "\$\{!name\}"/, `${file.join("/")}: bash echo eats a leading -n/-e/-E`);
+    assert.match(workflow, /printf '%s\\n' "\$\{!name\}"/, `${file.join("/")}: printf writes the value verbatim`);
+  }
+});
+
+test("a manual run never creates a release named after a branch", () => {
+  // workflow_dispatch on main would hand tauri-action `main` as tagName.
+  for (const file of [[".github", "workflows", "release.yml"], ["templates", "release.yml"]]) {
+    const workflow = read(...file);
+    const release = workflow.slice(workflow.indexOf("- name: Build and release"));
+    assert.match(release, /if: startsWith\(github\.ref, 'refs\/tags\/'\)/, `${file.join("/")}: the release step must be gated on a tag`);
+  }
 });
 
 // Extract the `run:` script of the step gated on the given SIGN_* flag, and run
@@ -540,14 +562,38 @@ test("the scaffold never overwrites a release workflow", () => {
   assert.match(said.join("\n"), /templates\/release\.yml/, "and where to find the template if they want it");
 });
 
+test("the kept-your-file message points somewhere that outlives an npx cache", () => {
+  const project = scratchProject();
+  const target = join(project, ".github", "workflows", "release.yml");
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, "# mine\n");
+  const said = [];
+
+  writeReleaseWorkflow(project, (line) => said.push(line));
+
+  const message = said.join("\n");
+  assert.match(message, /github\.com\/aguspe\/turbo_desktop\/blob\/main\/templates\/release\.yml/);
+  assert.doesNotMatch(message, new RegExp(PACKAGE_ROOT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), "an npx install path is gone next week");
+});
+
+test("the next steps only promise installers when the workflow was actually written", () => {
+  const written = releaseNextStep(true);
+  assert.match(written, /builds installers/);
+  assert.match(written, /git tag v/);
+  assert.match(written, /APPLE_\*/);
+
+  const kept = releaseNextStep(false);
+  assert.doesNotMatch(kept, /builds installers/, "their own workflow runs on a tag, not ours");
+  assert.match(kept, /already had/i);
+  assert.match(kept, /templates\/release\.yml/, "and says where the scaffold's version is");
+});
+
 test("init runs the workflow step and tells the user about tags and secrets", () => {
   const cli = read("cli", "turbo-desktop.js");
   const init = cli.slice(cli.indexOf("function cmdInit("), cli.indexOf("function cmdDev("));
 
-  assert.match(init, /writeReleaseWorkflow\(projectDir\)/, "cmdInit should write the workflow");
-  assert.match(init, /git tag v/, "next steps should show how a release starts");
-  assert.match(init, /APPLE_\*/, "next steps should mention the signing secrets");
-  assert.match(init, /DISTRIBUTION\.md/, "and point at the guide");
+  assert.match(init, /= writeReleaseWorkflow\(projectDir\)/, "cmdInit should write the workflow and keep the result");
+  assert.match(init, /releaseNextStep\(/, "the next steps should depend on whether it was written");
 });
 
 test("the distribution guide explains every signing secret and no longer says to uncomment", () => {

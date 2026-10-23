@@ -77,7 +77,7 @@ jobs:
               echo "::error::$name is not set. Signing needs all six APPLE_* secrets; see docs/DISTRIBUTION.md"
               exit 1
             fi
-            { echo "$name<<__TURBO_DESKTOP__"; echo "${!name}"; echo "__TURBO_DESKTOP__"; } >> "$GITHUB_ENV"
+            { echo "$name<<__TURBO_DESKTOP__"; printf '%s\n' "${!name}"; echo "__TURBO_DESKTOP__"; } >> "$GITHUB_ENV"
           done
 
       - name: Enable updater signing when the key is set
@@ -88,10 +88,13 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           for name in TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD; do
-            { echo "$name<<__TURBO_DESKTOP__"; echo "${!name}"; echo "__TURBO_DESKTOP__"; } >> "$GITHUB_ENV"
+            { echo "$name<<__TURBO_DESKTOP__"; printf '%s\n' "${!name}"; echo "__TURBO_DESKTOP__"; } >> "$GITHUB_ENV"
           done
 
       - name: Build and release
+        # A manual run on a branch would otherwise hand tauri-action the branch
+        # name as the tag, and create a release and a git tag called `main`.
+        if: startsWith(github.ref, 'refs/tags/')
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
