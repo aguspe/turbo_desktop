@@ -301,6 +301,8 @@ function cmdInit(args) {
     JSON.stringify(appConfig(guessAppName(projectDir)), null, 2)
   );
 
+  const { written: workflowWritten } = writeReleaseWorkflow(projectDir);
+
   console.log(`
 Turbo Desktop initialized successfully!
 
@@ -323,6 +325,8 @@ Next steps:
 
   4. Start the desktop app (it starts the Rails server too):
      cd desktop && turbo-desktop dev
+
+${releaseNextStep(workflowWritten)}
 `);
 }
 
@@ -615,4 +619,46 @@ export function guessAppName(projectDir) {
   return name
     .replace(/[_-]/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// Where to send someone for the template. Not the installed copy: under npx
+// that path lives in a cache that is gone by the time they come back to it.
+const RELEASE_TEMPLATE_URL =
+  "https://github.com/aguspe/turbo_desktop/blob/main/templates/release.yml";
+
+// Step 5 of the next steps, which depends on whether the workflow was written.
+// An app that already had .github/workflows/release.yml keeps its own, and a
+// tag then runs theirs, not ours, so promising installers would be a lie.
+export function releaseNextStep(written) {
+  if (!written) {
+    return `  5. Ship it. Your app already had .github/workflows/release.yml, so it
+     was kept. If you want macOS, Windows and Linux installers on a tag
+     push, the scaffold's version is at templates/release.yml:
+       ${RELEASE_TEMPLATE_URL}`;
+  }
+  return `  5. Ship it. .github/workflows/release.yml builds installers for
+     macOS, Windows and Linux when you push a tag:
+       git tag v0.1.0 && git push origin v0.1.0
+     Add the six APPLE_* repository secrets and macOS builds are signed
+     and notarized too. See docs/DISTRIBUTION.md in the turbo-desktop repo.`;
+}
+
+// Copy the release workflow into the Rails app. It goes in the app root, not in
+// desktop/, because GitHub only reads workflows from the repository root. A
+// workflow that is already there is the user's; leave it alone and say so.
+export function writeReleaseWorkflow(projectDir, log = console.log) {
+  const template = join(PACKAGE_ROOT, "templates", "release.yml");
+  const path = join(resolve(projectDir), ".github", "workflows", "release.yml");
+
+  if (existsSync(path)) {
+    log(
+      `\n  .github/workflows/release.yml already exists, left alone.\n` +
+        `  The scaffold's version is at ${RELEASE_TEMPLATE_URL}`
+    );
+    return { path, written: false };
+  }
+
+  mkdirSync(dirname(path), { recursive: true });
+  copyFileSync(template, path);
+  return { path, written: true };
 }
