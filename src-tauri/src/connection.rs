@@ -33,6 +33,9 @@ pub enum VisitError {
     HttpFailure { status: u16 },
     /// The page itself failed to load.
     PageLoadFailure,
+    /// Something else holds the app's port, so its own server cannot start.
+    /// Desktop only: a mobile shell never owns the server.
+    PortInUse,
 }
 
 impl VisitError {
@@ -44,6 +47,7 @@ impl VisitError {
             Self::TimeoutFailure => "timeout_failure",
             Self::HttpFailure { .. } => "http_failure",
             Self::PageLoadFailure => "page_load_failure",
+            Self::PortInUse => "port_in_use",
         }
     }
 }
@@ -120,6 +124,96 @@ pub fn server_is_reachable(url: &url::Url) -> bool {
     }
 }
 
+/// Who, if anyone, is answering at the app's address.
+///
+/// A TCP connect only proves *something* accepted. On a machine with more than
+/// one Rails app, port 3000 is very often held by a different one, and a bare
+/// probe cannot tell them apart — so the shell would skip starting the app's
+/// own server and then open whatever is there instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Liveness {
+    /// Nothing accepted the connection.
+    Absent,
+    /// Something is listening, but it does not answer as this app.
+    Foreign,
+    /// This app's server answered.
+    Ours,
+}
+
+/// Probe the app's address and say whose server is there.
+///
+/// Identity is the path-configuration endpoint the shell already depends on: a
+/// server that answers it with rules this shell can parse is this app's own. No
+/// new contract is introduced — this asks, at startup, the same question the
+/// background fetch asks a moment later.
+pub async fn server_liveness(url: &url::Url, path_config_url: &str, user_agent: &str) -> Liveness {
+    let probe_url = url.clone();
+    let accepted = tokio::task::spawn_blocking(move || server_is_reachable(&probe_url))
+        .await
+        .unwrap_or(false);
+
+    if !accepted {
+        return Liveness::Absent;
+    }
+
+    match crate::config::fetch_path_configuration(path_config_url, user_agent).await {
+        Ok(_) => Liveness::Ours,
+        Err(_) => Liveness::Foreign,
+    }
+}
+
+/// What "the server is up" means for this app.
+///
+/// Startup, the connection monitor and the retry button all ask it, and they
+/// must agree: if startup refuses to open on a stranger holding the port but
+/// the next probe counts any listener as online, the window moves onto the
+/// stranger a few seconds later anyway.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Probe {
+    /// The shell does not own the server, so it cannot say whose it is; anything
+    /// accepting the connection counts. A hosted app need not mount the engine.
+    AnyListener,
+    /// The shell starts the server itself, so only its own answering counts.
+    OwnServer {
+        path_config_url: String,
+        user_agent: String,
+    },
+}
+
+impl Probe {
+    /// Own the server (a `server.command` is configured) and only our own
+    /// answer counts; otherwise any listener does.
+    pub fn for_app(
+        server: &crate::window::ServerConfig,
+        path_config_url: String,
+        user_agent: String,
+    ) -> Probe {
+        if server.command.as_deref().unwrap_or("").trim().is_empty() {
+            Probe::AnyListener
+        } else {
+            Probe::OwnServer {
+                path_config_url,
+                user_agent,
+            }
+        }
+    }
+
+    pub async fn server_is_up(&self, url: &url::Url) -> bool {
+        match self {
+            Probe::AnyListener => {
+                let probe_url = url.clone();
+                tokio::task::spawn_blocking(move || server_is_reachable(&probe_url))
+                    .await
+                    .unwrap_or(false)
+            }
+            Probe::OwnServer {
+                path_config_url,
+                user_agent,
+            } => server_liveness(url, path_config_url, user_agent).await == Liveness::Ours,
+        }
+    }
+}
+
 /// Try the app again now, rather than waiting for the next scheduled probe.
 ///
 /// This is what the error page's retry button calls — the desktop counterpart of
@@ -140,10 +234,10 @@ pub async fn retry_connection(
         .parse()
         .map_err(|e| format!("Invalid server URL: {}", e))?;
 
-    let probe_url = url.clone();
-    let reachable = tokio::task::spawn_blocking(move || server_is_reachable(&probe_url))
-        .await
-        .unwrap_or(false);
+    // The same question startup asked, so a stranger on the port that kept the
+    // window on the error page cannot be let in by the retry button.
+    let probe = app.state::<Probe>();
+    let reachable = probe.server_is_up(&url).await;
 
     if reachable {
         if let Some(window) = app.get_webview_window("main") {
@@ -159,6 +253,84 @@ pub async fn retry_connection(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A listener bound and immediately released, so the port is free again.
+    fn free_port() -> u16 {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.local_addr().unwrap().port()
+    }
+
+    /// A listener that accepts and hangs up without speaking HTTP — the shape of
+    /// a stray process, or a server of some other kind, sitting on the port.
+    fn silent_listener() -> u16 {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                drop(stream);
+            }
+        });
+        port
+    }
+
+    /// A listener that answers the path-configuration request the way the Rails
+    /// engine does.
+    fn path_configuration_listener() -> u16 {
+        use std::io::{Read, Write};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for mut stream in listener.incoming().flatten() {
+                let mut buffer = [0u8; 1024];
+                let _ = stream.read(&mut buffer);
+                let body = r#"{"rules":[]}"#;
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+            }
+        });
+        port
+    }
+
+    fn urls(port: u16) -> (url::Url, String) {
+        (
+            format!("http://127.0.0.1:{port}/").parse().unwrap(),
+            format!("http://127.0.0.1:{port}/turbo-desktop/path-configuration.json"),
+        )
+    }
+
+    #[tokio::test]
+    async fn an_unused_port_has_nothing_on_it() {
+        let (url, path_config) = urls(free_port());
+        assert_eq!(
+            server_liveness(&url, &path_config, "test").await,
+            Liveness::Absent
+        );
+    }
+
+    #[tokio::test]
+    async fn a_listener_that_is_not_this_app_is_foreign() {
+        // The case this exists for: a second Rails app already on the port. A
+        // plain connect calls this reachable, and the shell would open it.
+        let (url, path_config) = urls(silent_listener());
+        assert_eq!(
+            server_liveness(&url, &path_config, "test").await,
+            Liveness::Foreign
+        );
+    }
+
+    #[tokio::test]
+    async fn a_server_answering_with_path_configuration_is_ours() {
+        let (url, path_config) = urls(path_configuration_listener());
+        assert_eq!(
+            server_liveness(&url, &path_config, "test").await,
+            Liveness::Ours
+        );
+    }
 
     #[test]
     fn a_single_failure_is_not_enough_to_go_offline() {
@@ -225,5 +397,60 @@ mod tests {
     fn an_unresolvable_host_is_not_reachable() {
         let url = url::Url::parse("http://turbo-desktop.invalid:3000").unwrap();
         assert!(!server_is_reachable(&url));
+    }
+
+    #[tokio::test]
+    async fn when_the_shell_owns_the_server_a_stranger_on_the_port_is_not_up() {
+        // The monitor and the retry button ask this. If they only asked whether
+        // something accepts, the window would move onto the other app.
+        let (url, path_config) = urls(silent_listener());
+        let probe = Probe::OwnServer {
+            path_config_url: path_config,
+            user_agent: "test".into(),
+        };
+        assert!(!probe.server_is_up(&url).await);
+    }
+
+    #[tokio::test]
+    async fn when_the_shell_owns_the_server_its_own_server_is_up() {
+        let (url, path_config) = urls(path_configuration_listener());
+        let probe = Probe::OwnServer {
+            path_config_url: path_config,
+            user_agent: "test".into(),
+        };
+        assert!(probe.server_is_up(&url).await);
+    }
+
+    #[tokio::test]
+    async fn a_hosted_app_counts_any_listener_as_up() {
+        // No server.command: the shell does not own the server and cannot say
+        // whose it is. A hosted app without the engine mounted keeps working.
+        let (url, _) = urls(silent_listener());
+        assert!(Probe::AnyListener.server_is_up(&url).await);
+    }
+
+    #[test]
+    fn the_probe_follows_whether_a_server_command_is_configured() {
+        let owned = crate::window::ServerConfig {
+            command: Some("bin/rails server".into()),
+            directory: None,
+        };
+        assert!(matches!(
+            Probe::for_app(&owned, "http://x/pc.json".into(), "ua".into()),
+            Probe::OwnServer { .. }
+        ));
+        assert!(matches!(
+            Probe::for_app(
+                &crate::window::ServerConfig::default(),
+                "http://x/pc.json".into(),
+                "ua".into()
+            ),
+            Probe::AnyListener
+        ));
+    }
+
+    #[test]
+    fn a_port_held_by_another_app_has_its_own_error_page() {
+        assert_eq!(VisitError::PortInUse.slug(), "port_in_use");
     }
 }

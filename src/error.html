@@ -20,7 +20,8 @@
         window.__TURBO_DESKTOP_SERVER_URL__  where to return to
         ?error=<slug>                        why it is being shown
                                              (network_failure, timeout_failure,
-                                              http_failure, page_load_failure)
+                                              http_failure, page_load_failure,
+                                              port_in_use)
     -->
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -113,6 +114,10 @@
           page_load_failure: {
             title: "The page didn't load",
             detail: "Something went wrong loading the page.",
+          },
+          port_in_use: {
+            title: "Something else is using the app's port",
+            detail: `Something is listening at <code>${SERVER_URL}</code>, but it is not this app, so its own server could not start. Stop whatever is using the port, or change <code>server_url</code> in <code>turbo-desktop.config.json</code>.`,
           },
         };
 
