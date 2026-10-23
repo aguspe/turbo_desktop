@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::RwLock;
+use std::time::Duration;
 
 /// Path Configuration — the core routing mechanism.
 ///
@@ -223,6 +224,14 @@ pub fn save_cache(dir: &Path, config: &PathConfiguration) -> Result<(), String> 
         .map_err(|e| format!("Could not cache path configuration: {}", e))
 }
 
+/// How long a path-configuration fetch may take, connect to parsed body.
+///
+/// Startup blocks on this fetch to tell the app's own server from a stranger
+/// on the port, before any window exists. A listener that accepts and then
+/// says nothing — a stuck process, a half-open socket — must not hold the
+/// launch open. The server is local, so this is generous.
+pub const PATH_CONFIGURATION_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Load path configuration from a remote URL (your Rails server).
 ///
 /// Sends the app's user agent so this request is recognisable to the server as
@@ -231,8 +240,18 @@ pub async fn fetch_path_configuration(
     url: &str,
     user_agent: &str,
 ) -> Result<PathConfiguration, String> {
+    fetch_path_configuration_within(url, user_agent, PATH_CONFIGURATION_TIMEOUT).await
+}
+
+/// [`fetch_path_configuration`] with an explicit deadline for the whole request.
+pub async fn fetch_path_configuration_within(
+    url: &str,
+    user_agent: &str,
+    timeout: Duration,
+) -> Result<PathConfiguration, String> {
     let client = reqwest::Client::builder()
         .user_agent(user_agent)
+        .timeout(timeout)
         .build()
         .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
 
@@ -554,5 +573,47 @@ mod tests {
             store.properties_for_path("/posts/edit").presentation,
             Presentation::Native
         );
+    }
+
+    /// A listener that accepts and then says nothing, holding the connection
+    /// open — the shape of a stuck process on the port.
+    fn hanging_listener() -> u16 {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let mut held = Vec::new();
+            for stream in listener.incoming().flatten() {
+                held.push(stream);
+            }
+        });
+        port
+    }
+
+    #[tokio::test]
+    async fn a_server_that_never_answers_does_not_hold_the_fetch_forever() {
+        let url = format!(
+            "http://127.0.0.1:{}/turbo-desktop/path-configuration.json",
+            hanging_listener()
+        );
+        let started = std::time::Instant::now();
+
+        let result =
+            fetch_path_configuration_within(&url, "test", Duration::from_millis(300)).await;
+
+        assert!(
+            result.is_err(),
+            "a silent listener is not a path configuration"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "the fetch should give up at the deadline, took {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn the_default_fetch_is_bounded() {
+        // Startup blocks on this fetch before any window exists, so it must end.
+        assert!(PATH_CONFIGURATION_TIMEOUT <= Duration::from_secs(5));
     }
 }
