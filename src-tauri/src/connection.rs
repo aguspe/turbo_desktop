@@ -33,6 +33,9 @@ pub enum VisitError {
     HttpFailure { status: u16 },
     /// The page itself failed to load.
     PageLoadFailure,
+    /// Something else holds the app's port, so its own server cannot start.
+    /// Desktop only: a mobile shell never owns the server.
+    PortInUse,
 }
 
 impl VisitError {
@@ -44,6 +47,7 @@ impl VisitError {
             Self::TimeoutFailure => "timeout_failure",
             Self::HttpFailure { .. } => "http_failure",
             Self::PageLoadFailure => "page_load_failure",
+            Self::PortInUse => "port_in_use",
         }
     }
 }
@@ -158,6 +162,58 @@ pub async fn server_liveness(url: &url::Url, path_config_url: &str, user_agent: 
     }
 }
 
+/// What "the server is up" means for this app.
+///
+/// Startup, the connection monitor and the retry button all ask it, and they
+/// must agree: if startup refuses to open on a stranger holding the port but
+/// the next probe counts any listener as online, the window moves onto the
+/// stranger a few seconds later anyway.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Probe {
+    /// The shell does not own the server, so it cannot say whose it is; anything
+    /// accepting the connection counts. A hosted app need not mount the engine.
+    AnyListener,
+    /// The shell starts the server itself, so only its own answering counts.
+    OwnServer {
+        path_config_url: String,
+        user_agent: String,
+    },
+}
+
+impl Probe {
+    /// Own the server (a `server.command` is configured) and only our own
+    /// answer counts; otherwise any listener does.
+    pub fn for_app(
+        server: &crate::window::ServerConfig,
+        path_config_url: String,
+        user_agent: String,
+    ) -> Probe {
+        if server.command.as_deref().unwrap_or("").trim().is_empty() {
+            Probe::AnyListener
+        } else {
+            Probe::OwnServer {
+                path_config_url,
+                user_agent,
+            }
+        }
+    }
+
+    pub async fn server_is_up(&self, url: &url::Url) -> bool {
+        match self {
+            Probe::AnyListener => {
+                let probe_url = url.clone();
+                tokio::task::spawn_blocking(move || server_is_reachable(&probe_url))
+                    .await
+                    .unwrap_or(false)
+            }
+            Probe::OwnServer {
+                path_config_url,
+                user_agent,
+            } => server_liveness(url, path_config_url, user_agent).await == Liveness::Ours,
+        }
+    }
+}
+
 /// Try the app again now, rather than waiting for the next scheduled probe.
 ///
 /// This is what the error page's retry button calls — the desktop counterpart of
@@ -178,10 +234,10 @@ pub async fn retry_connection(
         .parse()
         .map_err(|e| format!("Invalid server URL: {}", e))?;
 
-    let probe_url = url.clone();
-    let reachable = tokio::task::spawn_blocking(move || server_is_reachable(&probe_url))
-        .await
-        .unwrap_or(false);
+    // The same question startup asked, so a stranger on the port that kept the
+    // window on the error page cannot be let in by the retry button.
+    let probe = app.state::<Probe>();
+    let reachable = probe.server_is_up(&url).await;
 
     if reachable {
         if let Some(window) = app.get_webview_window("main") {
@@ -341,5 +397,60 @@ mod tests {
     fn an_unresolvable_host_is_not_reachable() {
         let url = url::Url::parse("http://turbo-desktop.invalid:3000").unwrap();
         assert!(!server_is_reachable(&url));
+    }
+
+    #[tokio::test]
+    async fn when_the_shell_owns_the_server_a_stranger_on_the_port_is_not_up() {
+        // The monitor and the retry button ask this. If they only asked whether
+        // something accepts, the window would move onto the other app.
+        let (url, path_config) = urls(silent_listener());
+        let probe = Probe::OwnServer {
+            path_config_url: path_config,
+            user_agent: "test".into(),
+        };
+        assert!(!probe.server_is_up(&url).await);
+    }
+
+    #[tokio::test]
+    async fn when_the_shell_owns_the_server_its_own_server_is_up() {
+        let (url, path_config) = urls(path_configuration_listener());
+        let probe = Probe::OwnServer {
+            path_config_url: path_config,
+            user_agent: "test".into(),
+        };
+        assert!(probe.server_is_up(&url).await);
+    }
+
+    #[tokio::test]
+    async fn a_hosted_app_counts_any_listener_as_up() {
+        // No server.command: the shell does not own the server and cannot say
+        // whose it is. A hosted app without the engine mounted keeps working.
+        let (url, _) = urls(silent_listener());
+        assert!(Probe::AnyListener.server_is_up(&url).await);
+    }
+
+    #[test]
+    fn the_probe_follows_whether_a_server_command_is_configured() {
+        let owned = crate::window::ServerConfig {
+            command: Some("bin/rails server".into()),
+            directory: None,
+        };
+        assert!(matches!(
+            Probe::for_app(&owned, "http://x/pc.json".into(), "ua".into()),
+            Probe::OwnServer { .. }
+        ));
+        assert!(matches!(
+            Probe::for_app(
+                &crate::window::ServerConfig::default(),
+                "http://x/pc.json".into(),
+                "ua".into()
+            ),
+            Probe::AnyListener
+        ));
+    }
+
+    #[test]
+    fn a_port_held_by_another_app_has_its_own_error_page() {
+        assert_eq!(VisitError::PortInUse.slug(), "port_in_use");
     }
 }

@@ -37,6 +37,22 @@ pub fn decide(config: &ServerConfig, liveness: Liveness) -> Decision {
     }
 }
 
+/// Whether the window may open straight on the app, or must wait on the error
+/// page for the server to come up.
+///
+/// A port held by another app is the case that was slipping through: it was
+/// reported in the log and then opened in the window anyway, because anything
+/// accepting a connection counted as reachable.
+pub fn opens_app_at_startup(decision: &Decision, liveness: Liveness) -> bool {
+    match decision {
+        Decision::AlreadyRunning => true,
+        // Not ours to judge: a hosted app may not mount the engine at all.
+        Decision::NotConfigured => liveness != Liveness::Absent,
+        // Just asked to start, or cannot start: not there yet either way.
+        Decision::Start | Decision::PortHeldByAnotherApp => false,
+    }
+}
+
 /// Where the command runs, resolved against the directory the config was read from.
 ///
 /// The scaffold puts the config in `desktop/` and the Rails app one level up, so
@@ -244,5 +260,42 @@ mod tests {
             working_directory(&config, Some(&dir)).unwrap(),
             dir.join("nope")
         );
+    }
+
+    #[test]
+    fn the_window_does_not_open_on_a_port_held_by_another_app() {
+        // The bug this prevents: the stranger was reported in the log and then
+        // opened in the window anyway.
+        assert!(!opens_app_at_startup(
+            &Decision::PortHeldByAnotherApp,
+            Liveness::Foreign
+        ));
+    }
+
+    #[test]
+    fn the_window_opens_on_our_own_running_server() {
+        assert!(opens_app_at_startup(
+            &Decision::AlreadyRunning,
+            Liveness::Ours
+        ));
+    }
+
+    #[test]
+    fn a_hosted_app_opens_on_whatever_answers() {
+        // Without a server command the shell cannot tell whose server it is,
+        // and a hosted app need not mount the engine at all.
+        assert!(opens_app_at_startup(
+            &Decision::NotConfigured,
+            Liveness::Foreign
+        ));
+        assert!(!opens_app_at_startup(
+            &Decision::NotConfigured,
+            Liveness::Absent
+        ));
+    }
+
+    #[test]
+    fn a_server_just_asked_to_start_is_not_there_yet() {
+        assert!(!opens_app_at_startup(&Decision::Start, Liveness::Absent));
     }
 }

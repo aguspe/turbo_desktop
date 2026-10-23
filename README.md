@@ -527,7 +527,10 @@ Hotwire Native, so `network_failure`, `timeout_failure`, `http_failure` and
 The shell reports two of them today, `network_failure` and `http_failure`: a
 server that does not answer in time is reported as a `network_failure`. The
 other two names are kept so that an app written against them goes on working
-when the shell tells them apart.
+when the shell tells them apart. One name is the desktop shell's own:
+`port_in_use`, shown on the error page when the app starts its own server and
+something else already holds its port. The shell does not open on the stranger,
+and keeps waiting for your server rather than theirs.
 
 **What happens by default.** If your server is unreachable at launch, the window
 opens on a bundled error page. If it goes away while the app is running, a

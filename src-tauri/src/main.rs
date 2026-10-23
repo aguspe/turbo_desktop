@@ -223,10 +223,10 @@ fn main() {
                 &path_config_url,
                 &user_agent,
             ));
-            let mut reachable_at_startup = liveness != connection::Liveness::Absent;
             let config_dir = loaded.source.as_deref().and_then(|p| p.parent());
+            let decision = server::decide(&shell_defaults.server, liveness);
 
-            match server::decide(&shell_defaults.server, liveness) {
+            match &decision {
                 server::Decision::Start => {
                     let handle = app.handle().clone();
                     let server_config = shell_defaults.server.clone();
@@ -239,9 +239,6 @@ fn main() {
                     )) {
                         log::warn!("{}", e);
                     }
-
-                    // Not reachable yet — it has only just been asked to start.
-                    reachable_at_startup = false;
                 }
                 server::Decision::AlreadyRunning => {
                     log::info!("A server is already answering; leaving it alone")
@@ -258,13 +255,25 @@ fn main() {
                 server::Decision::NotConfigured => {}
             }
 
+            // From here on, "up" means what the decision above meant by it: an
+            // app that owns its server waits for its own, a hosted app for any.
+            let probe = connection::Probe::for_app(
+                &shell_defaults.server,
+                path_config_url.clone(),
+                user_agent.clone(),
+            );
+            app.manage(probe.clone());
+
+            let reachable_at_startup = server::opens_app_at_startup(&decision, liveness);
             let target = if reachable_at_startup {
                 WebviewUrl::External(url.clone())
             } else {
+                let error = match decision {
+                    server::Decision::PortHeldByAnotherApp => VisitError::PortInUse,
+                    _ => VisitError::NetworkFailure,
+                };
                 log::info!("Waiting for {}", url);
-                WebviewUrl::App(
-                    format!("error.html?error={}", VisitError::NetworkFailure.slug()).into(),
-                )
+                WebviewUrl::App(format!("error.html?error={}", error.slug()).into())
             };
 
             let main_window = window::apply_shell_defaults(
@@ -316,7 +325,13 @@ fn main() {
             // The web layer cannot see this on its own: the browser's `offline`
             // event reports the machine losing its network, not the app server
             // going away, which is the case that actually happens.
-            watch_connection(app_handle.clone(), url.clone(), reachable_at_startup, rules);
+            watch_connection(
+                app_handle.clone(),
+                url.clone(),
+                probe,
+                reachable_at_startup,
+                rules,
+            );
 
             // Links from outside the app: your-app://orders/123
             let deep_link_app = app_handle.clone();
@@ -508,6 +523,7 @@ impl PathConfigurationSource {
 fn watch_connection(
     app: tauri::AppHandle,
     url: url::Url,
+    probe: connection::Probe,
     reachable_at_startup: bool,
     rules: PathConfigurationSource,
 ) {
@@ -525,11 +541,7 @@ fn watch_connection(
         loop {
             tokio::time::sleep(PROBE_INTERVAL).await;
 
-            let probe_url = url.clone();
-            let reachable =
-                tokio::task::spawn_blocking(move || connection::server_is_reachable(&probe_url))
-                    .await
-                    .unwrap_or(false);
+            let reachable = probe.server_is_up(&url).await;
 
             let payload = match monitor.record(reachable) {
                 Transition::WentOffline(error) => {
