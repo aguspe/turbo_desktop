@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.2.5 (2026-10-24)
+
+Version aligned with the desktop shell's 0.2.5 release. Nothing in the gem
+changed. What changed in the shell and the CLI:
+
+### Added
+
+- `turbo-desktop init` and `turbo-desktop new` write
+  `.github/workflows/release.yml` into the Rails app. Add the six `APPLE_*`
+  repository secrets and macOS builds come out signed and notarized; nothing
+  in the workflow needs editing. A workflow that is already there is kept, and
+  the next steps say so.
+- A `port_in_use` error page. When the app starts its own server and something
+  else already holds its port, the window says so and waits for your server
+  instead of opening on the stranger.
+
+### Fixed
+
+- The shell tells its own server apart from any other on the port. A second
+  Rails app on 3000 used to count as "already running": the app's own server
+  was not started and the window opened on the other project. The shell now
+  asks the path-configuration endpoint, which only its own server answers.
+  (Thanks @DonsWayo, #35.)
+- Startup cannot hang on a listener that accepts and never answers. The fetch
+  that checks whose server is there gives up after five seconds.
+- The connection monitor and the error page's retry button ask the same
+  question startup asks, so a stranger on the port cannot be let in a few
+  seconds later.
+- Release workflow: secrets reach `GITHUB_ENV` through `printf`, so a value
+  starting with `-n` or `-e` survives, and the release step runs only on a tag,
+  so a manual run on a branch cannot create a release named after the branch.
+
 ## 0.2.4 (2026-09-28)
 
 Version aligned with the desktop shell's 0.2.4 release. In the gem, the Dev

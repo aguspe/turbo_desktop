@@ -4,17 +4,17 @@ A release reaches six places. A tag alone reaches one of them: 0.2.1 was tagged
 and announced, and never arrived on RubyGems or npm.
 
 Every part of a release carries the same version. The example below releases
-v0.2.4.
+v0.2.5.
 
 ## 1. Bump the version everywhere
 
 | File | Field |
 |---|---|
-| `package.json`, `package-lock.json` | `version` (`npm version 0.2.4 --no-git-tag-version` does both) |
+| `package.json`, `package-lock.json` | `version` (`npm version 0.2.5 --no-git-tag-version` does both) |
 | `src-tauri/Cargo.toml` | `version`; then `cargo check` to update `Cargo.lock` |
 | `src-tauri/tauri.conf.json` | `version` |
 | `src/turbo-desktop.js` | `version` |
-| `packages/bridge/package.json` | `version` (`npm version 0.2.4 --no-git-tag-version` inside `packages/bridge`) |
+| `packages/bridge/package.json` | `version` (`npm version 0.2.5 --no-git-tag-version` inside `packages/bridge`) |
 | `packages/bridge/turbo-desktop.d.ts` | a copy of `src/turbo-desktop.d.ts`; copy it again if the types changed |
 | `turbo_desktop-rails/lib/turbo_desktop/version.rb` | `VERSION`; then `bundle install` to update `Gemfile.lock` |
 | `turbo_desktop-rails/CHANGELOG.md` | a new entry |
@@ -31,8 +31,8 @@ Open a pull request, wait for CI to pass, merge to `main`.
 
 ```bash
 git switch main && git pull --ff-only
-git tag v0.2.4
-git push origin v0.2.4
+git tag v0.2.5
+git push origin v0.2.5
 ```
 
 The release workflow builds the installers and attaches them to a **draft**
@@ -44,8 +44,8 @@ than one draft for the tag, keep one and delete the rest.
 ```bash
 cd turbo_desktop-rails
 gem build turbo_desktop-rails.gemspec
-gem push turbo_desktop-rails-0.2.4.gem   # asks for a one-time password
-rm turbo_desktop-rails-0.2.4.gem
+gem push turbo_desktop-rails-0.2.5.gem   # asks for a one-time password
+rm turbo_desktop-rails-0.2.5.gem
 ```
 
 ## 5. Publish the npm package
@@ -80,7 +80,7 @@ Then scaffold an app from the registry, outside this checkout, and confirm it
 resolves to the new gem:
 
 ```bash
-cd "$(mktemp -d)" && npx --yes turbo-desktop@0.2.4 new scratch_app
+cd "$(mktemp -d)" && npx --yes turbo-desktop@0.2.5 new scratch_app
 grep "turbo_desktop-rails (" scratch_app/Gemfile.lock
 ```
 

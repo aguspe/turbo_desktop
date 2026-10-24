@@ -40,7 +40,7 @@
   // ─── Core API ──────────────────────────────────────────────────────────────
 
   // The shell's user agent names the platform it is running on, e.g.
-  // "Turbo Desktop/0.2.4 (Windows; x86_64)". This file is the same on every
+  // "Turbo Desktop/0.2.5 (Windows; x86_64)". This file is the same on every
   // platform, so the answer has to be read rather than written in.
   function detectPlatform() {
     const agent = navigator.userAgent || "";
@@ -53,7 +53,7 @@
   }
 
   const TurboDesktop = {
-    version: "0.2.4",
+    version: "0.2.5",
     platform: detectPlatform(),
     isNative: true,
 
