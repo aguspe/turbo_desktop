@@ -206,7 +206,7 @@ end
 # A page shown in a modal is a page with a window of its own around it. The
 # app's navigation does not belong in it, and the view has to be able to tell.
 class PresentationHelpersTest < Minitest::Test
-  DESKTOP_UA = "Turbo Desktop/0.2.4 (macOS; aarch64)"
+  DESKTOP_UA = "Turbo Desktop/0.2.5 (macOS; aarch64)"
   BROWSER_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
 
   def setup

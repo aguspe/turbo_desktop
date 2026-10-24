@@ -1016,13 +1016,13 @@ describe("TurboDesktop.platform", () => {
   }
 
   it("reports the platform the shell is running on", () => {
-    assert.equal(platformFor("Turbo Desktop/0.2.4 (macOS; aarch64)"), "macos");
-    assert.equal(platformFor("Turbo Desktop/0.2.4 (Windows; x86_64)"), "windows");
-    assert.equal(platformFor("Turbo Desktop/0.2.4 (Linux; x86_64)"), "linux");
+    assert.equal(platformFor("Turbo Desktop/0.2.5 (macOS; aarch64)"), "macos");
+    assert.equal(platformFor("Turbo Desktop/0.2.5 (Windows; x86_64)"), "windows");
+    assert.equal(platformFor("Turbo Desktop/0.2.5 (Linux; x86_64)"), "linux");
   });
 
   it("reads it past a custom user agent that keeps the token", () => {
-    assert.equal(platformFor("MyApp/3.1 Turbo Desktop/0.2.4 (Linux; aarch64)"), "linux");
+    assert.equal(platformFor("MyApp/3.1 Turbo Desktop/0.2.5 (Linux; aarch64)"), "linux");
   });
 });
 

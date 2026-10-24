@@ -893,7 +893,7 @@ Ship native installers for macOS, Windows, and Linux by pushing a git tag — th
 draft GitHub Release:
 
 ```bash
-git tag v0.2.4 && git push origin v0.2.4
+git tag v0.2.5 && git push origin v0.2.5
 ```
 
 `turbo-desktop new` writes the same workflow into your app. Add six `APPLE_*` repository secrets

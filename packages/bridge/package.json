@@ -1,6 +1,6 @@
 {
   "name": "turbo-desktop-bridge",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "JavaScript bridge for Turbo Desktop — typed imports for the turbo-desktop.js API",
   "type": "module",
   "main": "index.js",
