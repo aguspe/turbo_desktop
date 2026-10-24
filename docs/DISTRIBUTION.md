@@ -41,28 +41,52 @@ Output: `src-tauri/target/release/bundle/`.
 
 ## Using this in your own app
 
-`npx turbo-desktop new myapp` scaffolds a `desktop/` project. To get the same one-tag releases,
-copy `release.yml` into your app's `.github/workflows/` and point it at `desktop/`, where the
-scaffold puts the Tauri project: add `projectPath: desktop` under the `tauri-action` step's
-`with:`, and run the Node steps there too (`working-directory: desktop`, and `npm install` in
-place of `npm ci` unless you commit a lockfile). The matrix, the system dependencies and the
-draft release work as they are.
+`npx turbo-desktop new myapp` (and `init`) writes the same workflow into your Rails app at
+`.github/workflows/release.yml`, pointed at `desktop/`, where the scaffold puts the Tauri project.
+Push a tag and you get the draft release above, named after your repository.
+
+Scaffolded before this existed? Copy
+[`templates/release.yml`](../templates/release.yml) into your app's `.github/workflows/`.
 
 ## Signing & notarization (recommended before shipping to real users)
 
-Unsigned builds trigger Gatekeeper (macOS) and SmartScreen (Windows) warnings. Builds are **unsigned
-by default** so a first release just works. To sign, **uncomment the signing block** in
-`release.yml` and set the matching repo **secrets** (don't leave the env set to empty secrets — an
-empty `APPLE_CERTIFICATE` makes Tauri try, and fail, to import an empty certificate).
+Unsigned builds trigger Gatekeeper (macOS) and SmartScreen (Windows) warnings; on macOS the user
+has to right-click → Open the first time. Builds are **unsigned by default** so a first release
+just works.
 
-- **macOS** (Apple Developer ID + notarization): `APPLE_CERTIFICATE`,
-  `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`,
-  `APPLE_TEAM_ID`.
-- **Windows** (Authenticode): configure `bundle.windows.certificateThumbprint` (or a signing
-  command) in `tauri.conf.json`.
+**macOS:** add six repository secrets and the next tag ships signed and notarized. There is
+nothing to edit in the workflow: a step before the build checks for `APPLE_CERTIFICATE` and
+passes the secrets through only when it is set. If some are set and some are missing, the
+workflow stops in seconds and names the missing one.
 
-See the Tauri signing guides: [macOS](https://tauri.app/distribute/sign/macos/) ·
-[Windows](https://tauri.app/distribute/sign/windows/).
+You need an [Apple Developer Program](https://developer.apple.com/programs/) membership (paid,
+yearly) and Xcode installed once to create the certificate.
+
+| Secret | Value | How to get it |
+|---|---|---|
+| `APPLE_CERTIFICATE` | the `.p12` export, base64-encoded | Xcode → Settings → Accounts → Manage Certificates → **+** → *Developer ID Application*. Then in Keychain Access, right-click that certificate → Export → `.p12`, choose a password. `base64 -i cert.p12 \| pbcopy` |
+| `APPLE_CERTIFICATE_PASSWORD` | the password you chose at export | |
+| `APPLE_SIGNING_IDENTITY` | `Developer ID Application: Your Name (TEAMID)` | `security find-identity -v -p codesigning` prints it in quotes |
+| `APPLE_ID` | the email of your Apple account | |
+| `APPLE_PASSWORD` | an app-specific password, not your account password | [appleid.apple.com](https://appleid.apple.com) → Sign-In and Security → App-Specific Passwords |
+| `APPLE_TEAM_ID` | ten characters, e.g. `A1B2C3D4E5` | [developer.apple.com/account](https://developer.apple.com/account) → Membership details |
+
+From the terminal, with the [GitHub CLI](https://cli.github.com):
+
+```bash
+gh secret set APPLE_CERTIFICATE < <(base64 -i cert.p12)
+gh secret set APPLE_CERTIFICATE_PASSWORD
+gh secret set APPLE_SIGNING_IDENTITY
+gh secret set APPLE_ID
+gh secret set APPLE_PASSWORD
+gh secret set APPLE_TEAM_ID
+```
+
+Each command without input prompts for the value. Verify a released build with
+`spctl -a -vv "YourApp.app"`; a notarized app prints `source=Notarized Developer ID`.
+
+**Windows** (Authenticode): configure `bundle.windows.certificateThumbprint` (or a signing
+command) in `tauri.conf.json`. See the Tauri guide: [Windows](https://tauri.app/distribute/sign/windows/).
 
 ## Auto-update (optional)
 
@@ -73,15 +97,16 @@ are **off** until you configure them:
 2. Put the public key in `tauri.conf.json` → `plugins.updater.pubkey` and add your update-server
    `endpoints`.
 3. Add the private key + password as the `TAURI_SIGNING_PRIVATE_KEY` /
-   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secrets, and uncomment the two lines that pass them
-   through in `release.yml`.
+   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secrets. The workflow passes them through
+   automatically when the key is set.
 
 Details: [Tauri updater](https://tauri.app/plugin/updater/).
 
 ## Status
 
 - ✅ Cross-OS installers via one tag (this workflow).
-- ⚙️ Signing / notarization — opt-in (uncomment the block + supply certs).
+- ✅ macOS signing / notarization — automatic once the six `APPLE_*` secrets are set.
+- ⚙️ Windows signing — configure in `tauri.conf.json`.
 - ⚙️ Auto-update — plugin present, endpoints/keys not yet configured.
 
 ---
