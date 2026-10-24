@@ -3,6 +3,8 @@ require "turbo_desktop/engine" if defined?(Rails)
 require "turbo_desktop/configuration"
 require "turbo_desktop/detection"
 
+require "turbo_desktop/native"
+
 module TurboDesktop
   class << self
     def configuration

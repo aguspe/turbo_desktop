@@ -1,0 +1,100 @@
+name: Build relocatable runtimes
+
+# Builds the interpreter a packaged app ships, one per platform triple, and
+# proves each one relocates before publishing it.
+#
+# Windows is fetched rather than built: RubyInstaller already ships a portable
+# archive that relocates correctly, so building a second one would be work for
+# its own sake. Its gems still compile on the build machine, which is where a
+# compiler belongs.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "packaging/build-runtime.sh"
+      - "packaging/verify-runtime.sh"
+      - ".github/workflows/build-runtime.yml"
+
+env:
+  RUBY_VERSION: "3.4.8"
+
+jobs:
+  unix:
+    name: ${{ matrix.triple }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-14,     triple: arm64-darwin }
+          - { os: macos-15-intel, triple: x86_64-darwin }
+          - { os: ubuntu-24.04, triple: x86_64-linux }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq build-essential zlib1g-dev
+
+      # OpenSSL is ~20 minutes and changes only when its version does, so it is
+      # cached on the versions rather than rebuilt every run.
+      - name: Cache the vendored dependencies
+        uses: actions/cache@v4
+        with:
+          path: .runtime-build/vendor
+          key: vendor-${{ matrix.triple }}-openssl3.5.4-libdir-yaml0.2.5
+
+      - name: Build
+        run: packaging/build-runtime.sh --out "$PWD/out/ruby"
+
+      - name: Verify it relocates
+        run: packaging/verify-runtime.sh "$PWD/out/ruby"
+
+      - name: Package
+        run: |
+          tar -C out -czf "ruby-$RUBY_VERSION-${{ matrix.triple }}.tar.gz" ruby
+          ls -lh "ruby-$RUBY_VERSION-${{ matrix.triple }}.tar.gz"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runtime-${{ matrix.triple }}
+          path: ruby-*.tar.gz
+          retention-days: 14
+
+  windows:
+    name: x64-mingw-ucrt
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch the portable archive and check it relocates
+        shell: pwsh
+        run: |
+          # RubyInstaller's portable build already resolves relative to itself.
+          # Spike 3 established that it relocates, survives a path containing a
+          # space, and boots Rails with no compiler present.
+          $v = "3.4.10"
+          curl.exe -fsSL -o ruby.7z `
+            "https://github.com/oneclick/rubyinstaller2/releases/download/RubyInstaller-$v-1/rubyinstaller-$v-1-x64.7z"
+          7z x ruby.7z -oC:\unpacked | Out-Null
+          $src = (Get-ChildItem C:\unpacked | Select-Object -First 1).FullName
+
+          New-Item -ItemType Directory -Force -Path C:\moved | Out-Null
+          Copy-Item -Recurse $src C:\moved\ruby
+          & C:\moved\ruby\bin\ruby.exe -e 'require "psych"; require "openssl"; puts "OK  #{RUBY_VERSION} #{RUBY_PLATFORM}"'
+          if ($LASTEXITCODE -ne 0) { throw "the portable archive did not relocate" }
+          & C:\moved\ruby\bin\ruby.exe -e 'exit(RbConfig::CONFIG["prefix"].include?("moved") ? 0 : 1)'
+          if ($LASTEXITCODE -ne 0) { throw "RbConfig did not follow the binary" }
+          Write-Host "OK  relocates and RbConfig follows the binary"
+
+          Compress-Archive -Path C:\moved\ruby -DestinationPath "ruby-$v-x64-mingw-ucrt.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runtime-x64-mingw-ucrt
+          path: ruby-*.zip
+          retention-days: 14

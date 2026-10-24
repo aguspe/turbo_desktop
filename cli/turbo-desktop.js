@@ -185,6 +185,7 @@ function cmdInit(args) {
     "bridge.rs",
     "config.rs",
     "connection.rs",
+    "control.rs",
     "deep_link.rs",
     "fs_bridge.rs",
     "menu.rs",

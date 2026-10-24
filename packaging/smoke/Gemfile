@@ -1,0 +1,12 @@
+source "https://rubygems.org"
+
+# The lean set a packaged desktop app actually carries. Not the rails meta-gem:
+# a single-user app has no cable server, and actioncable drags in
+# websocket-driver, which ships source-only on Windows.
+gem "railties", "~> 8.1"
+gem "actionpack", "~> 8.1"
+gem "activerecord", "~> 8.1"
+gem "propshaft"
+gem "puma"
+gem "sqlite3"
+gem "tzinfo-data", platforms: %i[windows jruby]

@@ -5617,6 +5617,7 @@ dependencies = [
  "base64 0.22.1",
  "cocoa",
  "env_logger",
+ "getrandom 0.3.4",
  "log",
  "objc",
  "regex-lite",

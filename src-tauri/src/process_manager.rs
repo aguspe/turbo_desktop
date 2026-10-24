@@ -33,6 +33,12 @@ pub struct StopRequest {
 }
 
 impl StopRequest {
+    /// A request nobody waits on, for tests that stand in for the manager.
+    #[cfg(test)]
+    pub fn detached() -> Self {
+        StopRequest { done: None }
+    }
+
     /// Say the process has been stopped. Call it after killing the child.
     pub fn stopped(self) {
         if let Some(done) = self.done {

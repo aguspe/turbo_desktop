@@ -4,6 +4,7 @@
 mod bridge;
 mod config;
 mod connection;
+mod control;
 mod deep_link;
 mod fs_bridge;
 mod menu;
@@ -34,7 +35,7 @@ use connection::{ConnectionMonitor, Transition, VisitError};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::webview::PageLoadEvent;
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Listener, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_deep_link::DeepLinkExt;
 
 /// How often to check that the app server is still answering.
@@ -103,6 +104,7 @@ fn main() {
         ))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(process_manager::ProcessManager::new())
+        .manage(server::ServerAddress::default())
         .manage(window::LastWindowSize::default())
         .manage(window::FocusTracker::default())
         .manage(security::UserGrants::default())
@@ -232,10 +234,21 @@ fn main() {
                     let server_config = shell_defaults.server.clone();
                     let dir = config_dir.map(|d| d.to_path_buf());
 
+                    // Opened before the server starts, so the handshake can carry
+                    // it. Without this the app's own Ruby cannot reach a single
+                    // native capability.
+                    let control = tauri::async_runtime::block_on(control::start(handle.clone()))
+                        .map_err(|e| log::warn!("{}", e))
+                        .ok();
+                    if let Some(channel) = &control {
+                        app.manage(channel.clone());
+                    }
+
                     if let Err(e) = tauri::async_runtime::block_on(server::start(
                         &handle,
                         &server_config,
                         dir.as_deref(),
+                        control.as_ref(),
                     )) {
                         log::warn!("{}", e);
                     }
@@ -275,6 +288,26 @@ fn main() {
                 log::info!("Waiting for {}", url);
                 WebviewUrl::App(format!("error.html?error={}", error.slug()).into())
             };
+
+            // A bundled server picks its own port, so the window opens on the
+            // waiting page and moves across when the handshake arrives. Nothing
+            // polls: the server says when it is ready.
+            let waiting = app.handle().clone();
+            let listening_on = app.handle().clone();
+            listening_on.listen("turbo-desktop://server-ready", move |event| {
+                let payload = event.payload().trim_matches('"').to_string();
+                if payload.is_empty() {
+                    return;
+                }
+                if let Ok(target) = payload.parse::<url::Url>() {
+                    if let Some(window) = waiting.get_webview_window("main") {
+                        log::info!("The app server is up; moving the window to {}", target);
+                        if let Err(e) = window.navigate(target) {
+                            log::warn!("Could not move the window to the app: {}", e);
+                        }
+                    }
+                }
+            });
 
             let main_window = window::apply_shell_defaults(
                 WebviewWindowBuilder::new(app, "main", target),
@@ -541,21 +574,28 @@ fn watch_connection(
         loop {
             tokio::time::sleep(PROBE_INTERVAL).await;
 
-            let reachable = probe.server_is_up(&url).await;
+            // A bundled server chooses its own port, so what to probe is
+            // whatever it announced. Falling back to the configured URL keeps a
+            // developer's own `rails server` watched exactly as before.
+            let watching = server::ServerAddress::announced(&app)
+                .and_then(|address| address.parse::<url::Url>().ok())
+                .unwrap_or_else(|| url.clone());
+
+            let reachable = probe.server_is_up(&watching).await;
 
             let payload = match monitor.record(reachable) {
                 Transition::WentOffline(error) => {
-                    log::warn!("Lost the connection to {}", url);
+                    log::warn!("Lost the connection to {}", watching);
                     serde_json::json!({ "online": false, "error": error })
                 }
                 Transition::CameOnline => {
-                    log::info!("Reconnected to {}", url);
+                    log::info!("Reconnected to {}", watching);
                     // Before going back to the app, so the first page it
                     // shows is already presented by the server's rules. An
                     // app that starts its own server always finds it down at
                     // launch, and this is the first time it can be asked.
                     rules.refresh().await;
-                    return_to_app_if_on_error_page(&app, &url);
+                    return_to_app_if_on_error_page(&app, &watching);
                     serde_json::json!({ "online": true, "error": null })
                 }
                 Transition::Unchanged => continue,

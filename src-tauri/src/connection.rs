@@ -209,7 +209,20 @@ impl Probe {
             Probe::OwnServer {
                 path_config_url,
                 user_agent,
-            } => server_liveness(url, path_config_url, user_agent).await == Liveness::Ours,
+            } => {
+                // A bundled server picks its own port, so the identity check has
+                // to ask where it is listening now, not where the config said.
+                let at_address = url
+                    .join(
+                        url::Url::parse(path_config_url)
+                            .map(|u| u[url::Position::BeforePath..].to_string())
+                            .unwrap_or_default()
+                            .as_str(),
+                    )
+                    .map(|u| u.to_string())
+                    .unwrap_or_else(|_| path_config_url.clone());
+                server_liveness(url, &at_address, user_agent).await == Liveness::Ours
+            }
         }
     }
 }
@@ -419,6 +432,20 @@ mod tests {
             user_agent: "test".into(),
         };
         assert!(probe.server_is_up(&url).await);
+    }
+
+    #[tokio::test]
+    async fn a_bundled_server_is_asked_where_it_announced_itself() {
+        // A bundled server picks its own port, so the configured address is not
+        // where it lives. Identity has to be checked at the announced one, or
+        // the monitor would call the app's own server a stranger.
+        let (_, configured) = urls(free_port());
+        let (announced, _) = urls(path_configuration_listener());
+        let probe = Probe::OwnServer {
+            path_config_url: configured,
+            user_agent: "test".into(),
+        };
+        assert!(probe.server_is_up(&announced).await);
     }
 
     #[tokio::test]
